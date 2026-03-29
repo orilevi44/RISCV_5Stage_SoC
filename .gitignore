@@ -1,0 +1,15 @@
+# Icarus Verilog / Simulation outputs
+*.vvp
+*.vcd
+*.fst
+a.out
+
+# Build folders
+sim/waves.fst
+sim/program.hex
+# Ignore drawing folders
+draws/
+
+# Ignore drawio temporary and backup files
+.*.drawio.bkp
+*.drawio.bkp

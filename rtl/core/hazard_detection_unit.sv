@@ -1,0 +1,51 @@
+`timescale 1ns / 1ps
+
+/**
+ * Hazard Detection Unit
+ * Manages pipeline stalls (for Load-Use hazards) and flushes (for Branch hazards).
+ */
+module hazard_detection_unit (
+    input  logic [4:0] id_rs1,           // rs1 being decoded
+    input  logic [4:0] id_rs2,           // rs2 being decoded
+    input  logic [4:0] ex_rd_addr,       // rd currently in Execute stage
+    input  logic       ex_mem_read_en,   // High if the instruction in EX is a LOAD
+    input  logic       jump_branch_taken,// High if a Branch/Jump is decided in MEM stage
+    
+    // Control outputs to the pipeline
+    output logic       if_pc_en,         // 1 = update PC, 0 = freeze PC (Stall)
+    output logic       id_reg_en,        // 1 = update IF/ID, 0 = freeze IF/ID (Stall)
+    output logic       id_ex_flush,      // 1 = clear ID/EX (Stall or Branch)
+    output logic       if_id_flush       // 1 = clear IF/ID (Branch taken)
+);
+
+    always_comb begin
+        // Default: Pipeline flows normally
+        if_pc_en     = 1'b1;
+        id_reg_en    = 1'b1;
+        id_ex_flush  = 1'b0;
+        if_id_flush  = 1'b0;
+
+        /**
+         * 1. Load-Use Hazard Detection
+         * Occurs when a LOAD instruction is in EX and the next instruction needs its result.
+         * Since memory data isn't ready until the end of MEM stage, we must STALL for 1 cycle.
+         */
+        if (ex_mem_read_en && ((ex_rd_addr == id_rs1) || (ex_rd_addr == id_rs2))) begin
+            if_pc_en    = 1'b0; // Freeze Program Counter
+            id_reg_en   = 1'b0; // Freeze IF/ID Pipeline Register
+            id_ex_flush = 1'b1; // Insert a NOP (Bubble) into the Execute stage
+        end
+
+        /**
+         * 2. Control Hazard (Branch/Jump Taken)
+         * When a branch is confirmed, instructions already fetched in IF and ID are wrong.
+         * We must FLUSH them to prevent incorrect execution.
+         */
+        if (jump_branch_taken) begin
+            if_id_flush = 1'b1; // Clear IF/ID register
+            id_ex_flush = 1'b1; // Clear ID/EX register
+            // Note: If branch is in MEM, we might also need to flush EX (ex_mem_reg)
+        end
+    end
+
+endmodule
