@@ -12,10 +12,11 @@ if exist sim\waves.fst del /q sim\waves.fst
 if exist sim\riscv_sim del /q sim\riscv_sim
 if exist sim\soc.stems del /q sim\soc.stems
 
-:: 3. Compilation (Including all SoC directories)
+:: 3. Compilation (Including all SoC directories and Monitors)
 echo Compiling SoC and Testbench...
 iverilog -g2012 -o sim/soc_sim ^
 tb/soc_tb.sv ^
+tb/monitors/*.sv ^
 rtl/soc_top.sv ^
 rtl/core/*.sv ^
 rtl/interconnect/*.sv ^
@@ -32,6 +33,7 @@ if %errorlevel% neq 0 (
 echo Generating SoC Hierarchy Map...
 iverilog -g2012 -t null -o sim/soc.stems ^
 tb/soc_tb.sv ^
+tb/monitors/*.sv ^
 rtl/soc_top.sv ^
 rtl/core/*.sv ^
 rtl/interconnect/*.sv ^
