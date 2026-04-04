@@ -1,18 +1,23 @@
 `timescale 1ns / 1ps
 
+/**
+ * UART Transmitter (PHY)
+ * ----------------------
+ * Transmits 8-bit data serially (1 start bit, 8 data bits, 1 stop bit).
+ */
 module uart_tx #(
-    parameter CLK_FREQ = 100_000_000, // 100MHz
+    parameter CLK_FREQ = 100_000_000, // Default 100MHz
     parameter BAUD_RATE = 115_200
 )(
-    input  logic        clk,
-    input  logic        rst_n,
-    input  logic [7:0]  tx_data,  // המידע לשליחה
-    input  logic        tx_en,    // פקודת שליחה (מה-Bus)
-    output logic        tx_busy,  // האם ה-UART עסוק כרגע?
-    output logic        uart_txd  // הפין הפיזי שיוצא החוצה
+    input  logic       clk,
+    input  logic       rst_n,
+    input  logic [7:0] tx_data,  // 8-bit data to send
+    input  logic       tx_en,    // Start pulse (from Bus Wrapper)
+    output logic       tx_busy,  // High when transmission is in progress
+    output logic       uart_txd  // Physical TX serial pin
 );
 
-    // חישוב מספר מחזורי השעון לכל ביט
+    // Calculate clock cycles per bit
     localparam BIT_PERIOD = CLK_FREQ / BAUD_RATE;
     
     typedef enum logic [1:0] {IDLE, START, DATA, STOP} state_t;
@@ -24,20 +29,20 @@ module uart_tx #(
 
     always_ff @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
-            state <= IDLE;
-            uart_txd <= 1'b1; // UART IDLE state is High
-            tx_busy <= 1'b0;
+            state    <= IDLE;
+            uart_txd <= 1'b1; // UART Idle state is High
+            tx_busy  <= 1'b0;
             clk_count <= 0;
         end else begin
             case (state)
                 IDLE: begin
                     uart_txd <= 1'b1;
-                    tx_busy <= 1'b0;
+                    tx_busy  <= 1'b0;
                     if (tx_en) begin
                         data_buffer <= tx_data;
-                        tx_busy <= 1'b1;
-                        state <= START;
-                        clk_count <= 0;
+                        tx_busy     <= 1'b1;
+                        state       <= START;
+                        clk_count   <= 0;
                     end
                 end
 
@@ -47,7 +52,7 @@ module uart_tx #(
                         clk_count <= clk_count + 1;
                     end else begin
                         clk_count <= 0;
-                        state <= DATA;
+                        state     <= DATA;
                         bit_index <= 0;
                     end
                 end

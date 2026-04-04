@@ -1,9 +1,13 @@
 `timescale 1ns / 1ps
 
 /**
- * Forwarding Unit for a 5-Stage RISC-V Pipeline.
+ * Forwarding Unit
+ * ---------------
  * This unit resolves Data Hazards by providing the most recent data 
- * from MEM or WB stages directly to the ALU inputs in EX stage.
+ * from MEM or WB stages directly to the ALU inputs in the EX stage.
+ *
+ * Priority: MEM stage has higher priority as it contains the absolute 
+ * most recent version of a register's data.
  */
 module forwarding_unit (
     input  logic clk,
@@ -14,16 +18,16 @@ module forwarding_unit (
     input  logic        ex_rs1_used,      // High if current instruction reads rs1
     input  logic        ex_rs2_used,      // High if current instruction reads rs2
     
-    // Inputs from Memory Stage (for MEM hazard)
+    // Inputs from Memory Stage (MEM Hazard)
     input  logic [4:0]  mem_rd_addr,      // Destination register in MEM stage
-    input  logic        mem_reg_write_en, // High if MEM stage will write to RF
+    input  logic        mem_reg_write_en, // High if MEM stage writes to Register File
     
-    // Inputs from Writeback Stage (for WB hazard)
+    // Inputs from Writeback Stage (WB Hazard)
     input  logic [4:0]  wb_rd_addr,       // Destination register in WB stage
-    input  logic        wb_reg_write_en,  // High if WB stage will write to RF
+    input  logic        wb_reg_write_en,  // High if WB stage writes to Register File
     
     // Selection outputs for ALU Muxes
-    // 00: Register File | 01: WB Stage | 10: MEM Stage
+    // 00: RegFile | 01: WB Stage | 10: MEM Stage
     output logic [1:0]  forward_a_sel,
     output logic [1:0]  forward_b_sel
 );
@@ -60,7 +64,7 @@ module forwarding_unit (
         end
     end
 
-    // Debug logic for Simulation
+    // --- Debug Monitors for Simulation ---
     always @(posedge clk) begin
         if (forward_a_sel == 2'b10) 
             $display("[FWD] MEM Hazard detected on rs1 (x%0d). Bypassing data!", ex_rs1);
@@ -68,6 +72,8 @@ module forwarding_unit (
             $display("[FWD] MEM Hazard detected on rs2 (x%0d). Bypassing data!", ex_rs2);
         if (forward_a_sel == 2'b01) 
             $display("[FWD] WB Hazard detected on rs1 (x%0d). Bypassing data!", ex_rs1);
+        if (forward_b_sel == 2'b01) 
+            $display("[FWD] WB Hazard detected on rs2 (x%0d). Bypassing data!", ex_rs2);
     end
 
 endmodule

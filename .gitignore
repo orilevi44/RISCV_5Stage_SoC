@@ -1,15 +1,32 @@
-# Icarus Verilog / Simulation outputs
+# --- Simulation Binaries & Outputs ---
+soc_sim
 *.vvp
 *.vcd
 *.fst
 a.out
+*.log
 
-# Build folders
+# --- Specific Build Files ---
 sim/waves.fst
 sim/program.hex
-# Ignore drawing folders
-draws/
 
-# Ignore drawio temporary and backup files
+# --- Instruction/Data Memory Files ---
+# (Ignore if you want to keep your simulations private/local)
+# *.hex
+# *.mem
+
+# --- Compilation & Tool Artifacts ---
+ivlflags
+*.vpi
+
+# --- Documentation & Diagrams ---
+draws/
 .*.drawio.bkp
 *.drawio.bkp
+
+# --- OS & Editor Specific ---
+.vscode/
+.idea/
+*.swp
+.DS_Store
+Thumbs.db
