@@ -37,6 +37,7 @@ module system_bus (
      * Routes signals based on the defined Memory Map.
      */
     always_comb begin
+
         // Default values to prevent latches and unintended writes
         rom_sel  = 1'b0;
         ram_sel  = 1'b0;

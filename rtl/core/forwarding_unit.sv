@@ -1,39 +1,73 @@
 `timescale 1ns / 1ps
 
+/**
+ * Forwarding Unit for a 5-Stage RISC-V Pipeline.
+ * This unit resolves Data Hazards by providing the most recent data 
+ * from MEM or WB stages directly to the ALU inputs in EX stage.
+ */
 module forwarding_unit (
-    input  logic [4:0]  ex_rs1,
-    input  logic [4:0]  ex_rs2,
-    input  logic [4:0]  mem_rd_addr,
-    input  logic [4:0]  wb_rd_addr,
-    input  logic        mem_reg_write_en,
-    input  logic        wb_reg_write_en,
+    input  logic clk,
     
-    // אותות חדשים: האם הפקודה ב-EX באמת צריכה את הרגיסטרים האלו?
-    input  logic        ex_rs1_used,
-    input  logic        ex_rs2_used,
+    // Inputs from Execute Stage
+    input  logic [4:0]  ex_rs1,           // Source Register 1
+    input  logic [4:0]  ex_rs2,           // Source Register 2
+    input  logic        ex_rs1_used,      // High if current instruction reads rs1
+    input  logic        ex_rs2_used,      // High if current instruction reads rs2
     
+    // Inputs from Memory Stage (for MEM hazard)
+    input  logic [4:0]  mem_rd_addr,      // Destination register in MEM stage
+    input  logic        mem_reg_write_en, // High if MEM stage will write to RF
+    
+    // Inputs from Writeback Stage (for WB hazard)
+    input  logic [4:0]  wb_rd_addr,       // Destination register in WB stage
+    input  logic        wb_reg_write_en,  // High if WB stage will write to RF
+    
+    // Selection outputs for ALU Muxes
+    // 00: Register File | 01: WB Stage | 10: MEM Stage
     output logic [1:0]  forward_a_sel,
     output logic [1:0]  forward_b_sel
 );
 
-    // לוגיקת Forwarding עבור אופרנד A (rs1)
+    // --- Forwarding for Operand A (rs1) ---
     always_comb begin
-        if (ex_rs1_used && mem_reg_write_en && (mem_rd_addr != 5'b0) && (mem_rd_addr == ex_rs1))
-            forward_a_sel = 2'b10; // מהזיכרון (הכי מעודכן)
-        else if (ex_rs1_used && wb_reg_write_en && (wb_rd_addr != 5'b0) && (wb_rd_addr == ex_rs1))
-            forward_a_sel = 2'b01; // מה-Writeback
-        else
-            forward_a_sel = 2'b00; // מה-Register File
+        // Priority 1: Forward from MEM stage (most recent)
+        if (ex_rs1_used && mem_reg_write_en && (mem_rd_addr != 5'b0) && (mem_rd_addr == ex_rs1)) begin
+            forward_a_sel = 2'b10;
+        end
+        // Priority 2: Forward from WB stage
+        else if (ex_rs1_used && wb_reg_write_en && (wb_rd_addr != 5'b0) && (wb_rd_addr == ex_rs1)) begin
+            forward_a_sel = 2'b01;
+        end
+        // Default: Use data from Register File
+        else begin
+            forward_a_sel = 2'b00;
+        end
     end
 
-    // לוגיקת Forwarding עבור אופרנד B (rs2)
+    // --- Forwarding for Operand B (rs2) ---
     always_comb begin
-        if (ex_rs2_used && mem_reg_write_en && (mem_rd_addr != 5'b0) && (mem_rd_addr == ex_rs2))
+        // Priority 1: Forward from MEM stage (most recent)
+        if (ex_rs2_used && mem_reg_write_en && (mem_rd_addr != 5'b0) && (mem_rd_addr == ex_rs2)) begin
             forward_b_sel = 2'b10;
-        else if (ex_rs2_used && wb_reg_write_en && (wb_rd_addr != 5'b0) && (wb_rd_addr == ex_rs2))
+        end
+        // Priority 2: Forward from WB stage
+        else if (ex_rs2_used && wb_reg_write_en && (wb_rd_addr != 5'b0) && (wb_rd_addr == ex_rs2)) begin
             forward_b_sel = 2'b01;
-        else
+        end
+        // Default: Use data from Register File
+        else begin
             forward_b_sel = 2'b00;
+        end
+    end
+
+    // Debug logic for Simulation
+    always @(posedge clk) begin
+        if (forward_a_sel == 2'b10) 
+            $display("[FWD] MEM Hazard detected on rs1 (x%0d). Bypassing data!", ex_rs1);
+        if (forward_b_sel == 2'b10) 
+            $display("[FWD] MEM Hazard detected on rs2 (x%0d). Bypassing data!", ex_rs2);
+        if (forward_a_sel == 2'b01) 
+            $display("[FWD] WB Hazard detected on rs1 (x%0d). Bypassing data!", ex_rs1);
     end
 
 endmodule

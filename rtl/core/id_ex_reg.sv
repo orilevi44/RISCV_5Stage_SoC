@@ -14,7 +14,7 @@ module id_ex_reg (
     input  logic [4:0]  id_rs1,
     input  logic [4:0]  id_rs2,
     input  logic [4:0]  id_rd,
-    input  logic [1:0]  id_alu_op_sel,
+    input  logic [2:0]  id_alu_op_sel,
     input  logic        id_alu_src_sel,
     input  logic        id_reg_write_en,
     input  logic        id_mem_read_en,    // הוספתי
@@ -35,7 +35,7 @@ module id_ex_reg (
     output logic [4:0]  ex_rs1,
     output logic [4:0]  ex_rs2,
     output logic [4:0]  ex_rd,
-    output logic [1:0]  ex_alu_op_sel,
+    output logic [2:0]  ex_alu_op_sel,
     output logic        ex_alu_src_sel,
     output logic        ex_reg_write_en,
     output logic        ex_mem_read_en,    

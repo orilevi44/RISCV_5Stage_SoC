@@ -15,7 +15,8 @@ module hazard_detection_unit (
     output logic       if_pc_en,         // 1 = update PC, 0 = freeze PC (Stall)
     output logic       id_reg_en,        // 1 = update IF/ID, 0 = freeze IF/ID (Stall)
     output logic       id_ex_flush,      // 1 = clear ID/EX (Stall or Branch)
-    output logic       if_id_flush       // 1 = clear IF/ID (Branch taken)
+    output logic       if_id_flush,       // 1 = clear IF/ID (Branch taken)
+    output logic       ex_mem_flush      // 1 = clear EX/MEM (Branch taken)
 );
 
     always_comb begin
@@ -44,6 +45,7 @@ module hazard_detection_unit (
         if (jump_branch_taken) begin
             if_id_flush = 1'b1; // Clear IF/ID register
             id_ex_flush = 1'b1; // Clear ID/EX register
+            ex_mem_flush = 1'b0; //
             // Note: If branch is in MEM, we might also need to flush EX (ex_mem_reg)
         end
     end

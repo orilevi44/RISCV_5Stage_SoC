@@ -6,8 +6,9 @@
  * This includes ALU results, store data, and branch target addresses.
  */
 module ex_mem_reg (
-    input  logic        clk,
-    input  logic        rst_n,
+    input  logic         clk,
+    input  logic         rst_n,
+    input  logic         flush,
     
     // --- Inputs from Execute (EX) ---
     input  logic [31:0] ex_alu_result,
@@ -15,16 +16,16 @@ module ex_mem_reg (
     input  logic [31:0] ex_branch_target,
     input  logic [4:0]  ex_rd_addr,
     input  logic [2:0]  ex_funct3,      
-    input  logic        ex_alu_zero,    
+    input  logic         ex_alu_zero,    
     
     // --- Control Signal Inputs from Execute ---
-    input  logic        ex_reg_write_en,
-    input  logic        ex_mem_to_reg_sel,
-    input  logic        ex_mem_read_en,
-    input  logic        ex_mem_write_en,
-    input  logic        ex_branch_en, 
-    input  logic        ex_jal_en,
-    input  logic        ex_jalr_en,
+    input  logic         ex_reg_write_en,
+    input  logic         ex_mem_to_reg_sel,
+    input  logic         ex_mem_read_en,
+    input  logic         ex_mem_write_en,
+    input  logic         ex_branch_en, 
+    input  logic         ex_jal_en,
+    input  logic         ex_jalr_en,
 
     // --- Outputs to Memory (MEM) ---
     output logic [31:0] mem_alu_result,
@@ -32,21 +33,21 @@ module ex_mem_reg (
     output logic [31:0] mem_branch_target,
     output logic [4:0]  mem_rd_addr,
     output logic [2:0]  mem_funct3,     
-    output logic        mem_alu_zero,   
+    output logic         mem_alu_zero,   
     
     // --- Control Signal Outputs to Memory ---
-    output logic        mem_reg_write_en,
-    output logic        mem_mem_to_reg_sel,
-    output logic        mem_mem_read_en,
-    output logic        mem_mem_write_en,
-    output logic        mem_branch_en,
-    output logic        mem_jal_en,
-    output logic        mem_jalr_en
+    output logic         mem_reg_write_en,
+    output logic         mem_mem_to_reg_sel,
+    output logic         mem_mem_read_en,
+    output logic         mem_mem_write_en,
+    output logic         mem_branch_en,
+    output logic         mem_jal_en,
+    output logic         mem_jalr_en
 );
 
     always_ff @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
-            // Reset state: All data and control signals cleared
+            // Hard Reset: Clear everything to zero
             mem_alu_result      <= 32'b0;
             mem_write_data      <= 32'b0;
             mem_branch_target   <= 32'b0;
@@ -60,7 +61,24 @@ module ex_mem_reg (
             mem_branch_en       <= 1'b0;
             mem_jal_en          <= 1'b0;
             mem_jalr_en         <= 1'b0;
-        end else begin
+        end 
+        else if (flush) begin
+            // Pipeline Flush:
+            // CRITICAL: We clear control signals to prevent unwanted writes/jumps,
+            // but we PRESERVE the branch target so Fetch stage can read it.
+            mem_reg_write_en    <= 1'b0;
+            mem_mem_read_en     <= 1'b0;
+            mem_mem_write_en    <= 1'b0;
+            mem_branch_en       <= 1'b0;
+            mem_jal_en          <= 1'b0;
+            mem_jalr_en         <= 1'b0;
+            
+            // Keep the branch target and data stable for the Fetch/Memory stages
+            mem_branch_target   <= mem_branch_target;
+            mem_alu_result      <= ex_alu_result;
+            mem_rd_addr         <= ex_rd_addr;
+        end 
+        else begin
             // Normal operation: Pass signals to the next stage
             mem_alu_result      <= ex_alu_result;
             mem_write_data      <= ex_write_data;

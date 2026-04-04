@@ -8,20 +8,21 @@ module cpu_monitor (
     input logic [31:0] pc,
     input logic [31:0] instr,
     input logic [31:0] alu_res,
+    input logic [1:0]  fwd_a, 
+    input logic [1:0]  fwd_b, 
     input logic        uart_busy
 );
 
     initial begin
-        $display("\n[TIME]    |  PC  |  INSTR   | ALU_RES | UART_ST");
-        $display("-----------------------------------------------");
+        // עדכון הכותרת
+        $display("\n[TIME]    |  PC  |  INSTR   | ALU_RES | FWD_A | FWD_B");
+        $display("------------------------------------------------------");
     end
 
-    // Monitor logic on every clock cycle
     always @(negedge clk) begin
         if (rst_n && instr !== 32'h0 && instr !== 32'hxxxxxxxx) begin
-            // $strobe("%7t | %h | %h | %h | %b", 
-            //     $time, pc, instr, alu_res, uart_busy
-            // );
+            // הדפסה של אותות ה-Forwarding
+            $strobe("%7t | %h | %h | %h |   %b   |   %b", $time, pc, instr, alu_res, fwd_a, fwd_b);
         end
     end
 endmodule

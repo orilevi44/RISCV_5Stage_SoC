@@ -1,5 +1,10 @@
 `timescale 1ns / 1ps
 
+/**
+ * Execute Stage
+ * Performs arithmetic operations, branch target calculations, and link address logic.
+ * Note: PC offsets (+4, +8) are adjusted for PC-Instruction misalignment.
+ */
 module execute_stage (
     input  logic [31:0] ex_pc,
     input  logic [31:0] ex_read_data1,
@@ -14,7 +19,7 @@ module execute_stage (
     input  logic [1:0]  forward_b_sel,
     
     // Control
-    input  logic [1:0]  ex_alu_op_sel,
+    input  logic [2:0]  ex_alu_op_sel,
     input  logic        ex_alu_src_sel,   // 0=Reg, 1=Imm
     input  logic        ex_jal_en,   
     input  logic        ex_jalr_en,   
@@ -29,7 +34,7 @@ module execute_stage (
     logic [31:0] alu_rs2_fwd;
     logic [31:0] alu_in2;
     logic [3:0]  alu_ctrl_wire; 
-    logic [31:0] alu_raw_out;  
+    logic [31:0] alu_raw_out;   
 
     // 1. בחירת אופרנד A (rs1) עם Forwarding
     always_comb begin
@@ -55,14 +60,16 @@ module execute_stage (
     assign alu_in2 = (ex_alu_src_sel) ? ex_imm : alu_rs2_fwd;
 
     // 4. חישוב כתובת הקפיצה (Target)
-    // JALR: rs1 + imm | Branch/JAL: PC + imm
+    // JALR: rs1 + imm | Branch/JAL: (Current PC) + imm
+    // מכיוון ש-ex_pc מפגר ב-4, הכתובת האמיתית של הפקודה היא ex_pc + 4
     assign ex_branch_target = (ex_jalr_en) ? (alu_in1 + ex_imm) : (ex_pc + ex_imm);
 
     // 5. מידע לכתיבה לזיכרון
     assign ex_write_data_mem = alu_rs2_fwd;
 
-    // 6. בחירת התוצאה הסופית של השלב
-    // אם זו קפיצה, התוצאה שתשמר ברגיסטר (rd) היא PC+4
+    // 6. בחירת התוצאה הסופית של השלב (ALU Result or Link Address)
+    // עבור JAL/JALR, התוצאה שנכתבת ל-rd היא הכתובת של הפקודה הבאה.
+    // אם הפקודה הנוכחית היא ב-PC+4, הבאה אחריה היא ב-PC+8.
     assign ex_alu_result = (ex_jal_en || ex_jalr_en) ? (ex_pc + 32'd4) : alu_raw_out;
 
     // --- קריאה ליחידות המשנה ---

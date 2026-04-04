@@ -24,7 +24,7 @@ module decode_stage (
     output logic        id_mem_read_en,
     output logic        id_mem_write_en,
     output logic        id_mem_to_reg_sel,
-    output logic [1:0]  id_alu_op_sel,
+    output logic [2:0]  id_alu_op_sel,    // שינוי ל-3 ביטים
     output logic        id_alu_src_sel,
     output logic        id_jal_en,
     output logic        id_jalr_en,
@@ -40,7 +40,6 @@ module decode_stage (
     assign id_rd     = if_id_inst[11:7];
     assign id_funct3 = if_id_inst[14:12]; 
 
-    // הגדרת משתנה עזר לאופקוד למניעת שגיאות ב-case
     logic [6:0] opcode;
     assign opcode = if_id_inst[6:0];
 
@@ -59,12 +58,12 @@ module decode_stage (
     );
 
     always_comb begin
-        // ערכי ברירת מחדל כדי למנוע Latches וערכי X
+        // ערכי ברירת מחדל
         id_reg_write_en   = 1'b0;
         id_mem_read_en    = 1'b0;
         id_mem_write_en   = 1'b0;
         id_mem_to_reg_sel = 1'b0;
-        id_alu_op_sel     = 2'b00;
+        id_alu_op_sel     = 3'b000;
         id_alu_src_sel    = 1'b0;
         id_branch_en      = 1'b0;
         id_jal_en         = 1'b0;
@@ -75,14 +74,14 @@ module decode_stage (
         case (opcode)
             7'b0110011: begin // R-type (ADD, SUB...)
                 id_reg_write_en = 1'b1;
-                id_alu_op_sel   = 2'b10;
+                id_alu_op_sel   = 3'b010; // מותאם ל-alu_control
                 id_rs1_used     = 1'b1;
                 id_rs2_used     = 1'b1;
             end
             7'b0010011: begin // I-type ALU (ADDI)
                 id_reg_write_en = 1'b1;
                 id_alu_src_sel  = 1'b1;
-                id_alu_op_sel   = 2'b11; 
+                id_alu_op_sel   = 3'b011; // מותאם ל-alu_control
                 id_rs1_used     = 1'b1;
             end
             7'b0000011: begin // Load (LW)
@@ -90,17 +89,19 @@ module decode_stage (
                 id_mem_read_en    = 1'b1;
                 id_mem_to_reg_sel = 1'b1;
                 id_alu_src_sel    = 1'b1;
+                id_alu_op_sel     = 3'b000;
                 id_rs1_used       = 1'b1;
             end
             7'b0100011: begin // Store (SW)
                 id_mem_write_en = 1'b1;
                 id_alu_src_sel  = 1'b1;
+                id_alu_op_sel   = 3'b000;
                 id_rs1_used     = 1'b1;
                 id_rs2_used     = 1'b1; 
             end
             7'b1100011: begin // Branch (BEQ)
                 id_branch_en   = 1'b1;
-                id_alu_op_sel  = 2'b01;
+                id_alu_op_sel  = 3'b001; // מותאם ל-alu_control
                 id_rs1_used    = 1'b1;
                 id_rs2_used    = 1'b1;
             end
@@ -112,13 +113,19 @@ module decode_stage (
                 id_reg_write_en = 1'b1;
                 id_jalr_en      = 1'b1;
                 id_alu_src_sel  = 1'b1;
+                id_alu_op_sel   = 3'b000;
                 id_rs1_used     = 1'b1;
             end
-            7'b0110111: begin // LUI
+            
+            // --- התיקון עבור LUI (Load Upper Immediate) ---
+            7'b0110111: begin 
                 id_reg_write_en = 1'b1;
-                id_alu_src_sel  = 1'b1;
-                id_alu_op_sel   = 2'b11;
+                id_alu_src_sel  = 1'b1;   // בוחר ב-Immediate
+                id_alu_op_sel   = 3'b100; // קוד מיוחד ל-Pass-B
+                id_rs1_used     = 1'b0;   // חשוב: LUI לא משתמש ברגיסטר מקור
+                id_rs2_used     = 1'b0;
             end
+            
             default: ;
         endcase
     end
