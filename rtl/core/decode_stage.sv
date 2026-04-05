@@ -42,17 +42,25 @@ module decode_stage (
     
     // Status signals for Hazard/Forwarding units
     output logic        id_rs1_used,
-    output logic        id_rs2_used
+    output logic        id_rs2_used, 
+    
+    // CSR Signals
+    output logic        id_csr_en,
+    output logic        id_valid_inst
 );
 
     // --- Field Extraction ---
-    assign id_rs1    = if_id_inst[19:15];
+    // Force rs1 to x0 for LUI instructions so the ALU adds 0 + Immediate
+    assign id_rs1    = (opcode == 7'b0110111) ? 5'b0 : if_id_inst[19:15];
     assign id_rs2    = if_id_inst[24:20];
     assign id_rd     = if_id_inst[11:7];
     assign id_funct3 = if_id_inst[14:12]; 
 
     logic [6:0] opcode;
     assign opcode = if_id_inst[6:0];
+
+    // A valid instruction is anything that isn't a zeroed-out NOP
+    assign id_valid_inst = (if_id_inst != 32'h00000013) && (opcode != 7'b0);
 
     // --- Register File Instance ---
     reg_file reg_file_inst (
@@ -85,6 +93,7 @@ module decode_stage (
         id_jal_en         = 1'b0;
         id_jalr_en        = 1'b0;
         id_auipc_en       = 1'b0;
+        id_csr_en         = 1'b0;
         id_rs1_used       = 1'b0;
         id_rs2_used       = 1'b0;
 
@@ -151,7 +160,7 @@ module decode_stage (
             7'b0110111: begin 
                 id_reg_write_en = 1'b1;
                 id_alu_src_sel  = 1'b1;   
-                id_alu_op_sel   = 3'b100; // Pass-B logic in ALU_Control
+                id_alu_op_sel   = 3'b000; // Pass-B logic in ALU_Control
                 id_rs1_used     = 1'b0;   
                 id_rs2_used     = 1'b0;
             end
@@ -164,6 +173,14 @@ module decode_stage (
                 id_auipc_en     = 1'b1;   // Signals Execute stage to use PC as Operand A
                 id_rs1_used     = 1'b0;   
                 id_rs2_used     = 1'b0;
+            end
+
+            // SYSTEM instructions (CSR Access)
+            7'b1110011: begin
+                id_reg_write_en   = 1'b1;   
+                id_alu_op_sel     = 3'b000; 
+                id_csr_en         = 1'b1;   // Enable CSR path
+                id_rs1_used       = 1'b1;
             end
             
             default: ;

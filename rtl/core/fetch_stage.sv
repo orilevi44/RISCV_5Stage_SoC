@@ -4,31 +4,30 @@
  * Fetch Stage
  * -----------
  * Manages the Program Counter (PC) and interfaces with Instruction Memory.
- * Includes logic for stalling and jumping.
+ * Updated for Asynchronous ROM timing.
  */
 module fetch_stage (
-    input  logic         clk,
-    input  logic         rst_n,
-    input  logic         en,             // Stall signal from Hazard Unit
-    input  logic         jump_sel,       // High if Branch/Jump is taken
+    input  logic        clk,
+    input  logic        rst_n,
+    input  logic        en,             // Stall signal from Hazard Unit
+    input  logic        jump_sel,       // High if Branch/Jump is taken
     input  logic [31:0] jump_addr,      // Target address from MEM stage
 
     // Instruction Memory Interface
     output logic [31:0] icache_addr,    
     input  logic [31:0] icache_instr,   
-    input  logic         icache_ready,   
+    input  logic        icache_ready,   
 
     // Pipeline Stage Outputs
     output logic [31:0] if_pc,          
     output logic [31:0] if_instr,       
-    output logic         if_stall        
+    output logic        if_stall        
 );
 
     // --- Internal Signals ---
     logic [31:0] current_fetch_pc;
     logic [31:0] next_pc;
     logic [31:0] pc_plus_4;
-    logic [31:0] pc_delayed_q;
     logic        pc_en;
 
     // 1. Next PC Logic
@@ -59,19 +58,10 @@ module fetch_stage (
         .pc_out  (current_fetch_pc)
     );
 
-    // 4. Delay Register: Synchronizes the PC with the arriving instruction from memory
-    always_ff @(posedge clk or negedge rst_n) begin
-        if (!rst_n) begin
-            pc_delayed_q <= 32'b0;
-        end else if (pc_en) begin
-            // If jumping, the PC sent to Decode in the next cycle must be the jump target
-            pc_delayed_q <= next_pc; 
-        end
-    end
-
     // --- Output Assignments ---
-    assign icache_addr = next_pc;       // Send next address to memory (early fetch)
-    assign if_pc       = pc_delayed_q; 
+    // With an async ROM, we directly ask for the current PC's instruction
+    assign icache_addr = current_fetch_pc;  
+    assign if_pc       = current_fetch_pc; 
     assign if_instr    = icache_instr; 
 
 endmodule

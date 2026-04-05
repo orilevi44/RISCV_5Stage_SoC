@@ -1,21 +1,23 @@
 `timescale 1ns / 1ps
 
 /**
- * RISC-V 32-bit Core (RV32I)
- * -------------------------
- * Top-level core module connecting the 5-stage pipeline.
- * Supports: Full ALU ops, Load/Store (LB/LW), Jumps, and all Branch types.
+ * RISC-V 32-bit Core (RV32I + CSR)
+ * --------------------------------
+ * A 5-stage pipelined processor with support for:
+ * 1. Full RV32I Base Integer ISA.
+ * 2. CSR Performance Counters (mcycle, minstret).
+ * 3. Hazard Detection and Forwarding.
  */
 module riscv_core (
     input  logic        clk,
     input  logic        rst_n,
     
-    // Instruction Memory (ROM) Interface
+    // Instruction Memory Interface
     output logic [31:0] instr_mem_addr,
     input  logic [31:0] instr_mem_data,
     input  logic        instr_mem_ready,
 
-    // Data Memory (RAM/Peripherals) Interface
+    // Data Memory Interface
     output logic [31:0] data_mem_addr,
     output logic [31:0] data_mem_wr_data,
     output logic        data_mem_wr_en,
@@ -24,45 +26,54 @@ module riscv_core (
 
     // --- 1. Internal Pipeline Wires ---
     
-    // IF Stage
+    // Fetch Stage
     logic [31:0] if_pc, if_inst;
     logic        if_pc_en, if_stall;
 
-    // ID Stage
+    // Decode Stage
     logic [31:0] id_pc, id_inst, id_read_data1, id_read_data2, id_imm;
     logic [4:0]  id_rs1, id_rs2, id_rd_addr;
     logic [2:0]  id_funct3;
     logic        id_reg_write_en, id_mem_read_en, id_mem_write_en, id_mem_to_reg_sel;
     logic [2:0]  id_alu_op_sel;
     logic        id_alu_src_sel, id_branch_en, id_jal_en, id_jalr_en, id_auipc_en;
+    logic        id_csr_en, id_valid_inst; 
+    logic [11:0] id_csr_addr;
     logic        id_reg_en, if_id_flush, id_rs1_used, id_rs2_used;
 
-    // EX Stage
+    // Execute Stage
     logic [31:0] ex_pc, ex_read_data1, ex_read_data2, ex_imm, ex_inst, ex_alu_res, ex_branch_target, ex_wr_data_mem;
+    logic [31:0] ex_rs1_fwd_out;
     logic [4:0]  ex_rs1, ex_rs2, ex_rd_addr;
     logic [2:0]  ex_funct3;
     logic        ex_reg_write_en, ex_mem_read_en, ex_mem_write_en, ex_mem_to_reg_sel;
     logic        ex_alu_src_sel, ex_branch_en, ex_alu_zero, ex_jal_en, ex_jalr_en, ex_auipc_en;
+    logic        ex_csr_en, ex_valid_inst;
+    logic [11:0] ex_csr_addr;
     logic [2:0]  ex_alu_op_sel;
     logic        id_ex_flush, ex_rs1_used, ex_rs2_used;
 
-    // MEM Stage
+    // Memory Stage
     logic [31:0] mem_alu_res, mem_wr_data, mem_rd_data, mem_branch_target;
     logic [4:0]  mem_rd_addr;
     logic [2:0]  mem_funct3;
     logic        mem_reg_write_en, mem_mem_read_en, mem_mem_write_en, mem_mem_to_reg_sel;
     logic        mem_branch_en, mem_alu_zero, mem_branch_taken, mem_jal_en, mem_jalr_en, ex_mem_flush;
+    logic        mem_valid_inst;
 
-    // WB Stage
+    // Writeback Stage
     logic [31:0] wb_alu_res, wb_mem_data, wb_final_data; 
     logic [4:0]  wb_rd_addr;
-    logic        wb_reg_write_en, wb_mem_to_reg_sel;
+    logic        wb_reg_write_en, wb_mem_to_reg_sel, wb_valid_inst;
 
-    // Control & Hazards
+    // CSR Signal
+    logic [31:0] csr_rdata_wire;
+
+    // Hazards & Forwarding
     logic [1:0]  forward_a_sel, forward_b_sel;
     logic [31:0] final_branch_addr; 
     
-    // Branch/Jump Decision: Resolves in MEM stage
+    // Global Jump decision resolves in MEM stage
     wire actual_jump = (mem_branch_taken === 1'b1) || (mem_jal_en === 1'b1) || (mem_jalr_en === 1'b1);
 
     // --- 2. Pipeline Stage Instantiations ---
@@ -75,7 +86,7 @@ module riscv_core (
         .if_pc(if_pc), .if_instr(if_inst), .if_stall(if_stall)
     );
 
-    if_id_reg if_id_reg_inst (
+    if_id_reg u_if_id_reg (
         .clk(clk), .rst_n(rst_n), .flush(if_id_flush), .en(id_reg_en),
         .if_pc(if_pc), .if_inst(if_inst), .id_pc(id_pc), .id_inst(id_inst)
     );
@@ -90,10 +101,13 @@ module riscv_core (
         .id_mem_write_en(id_mem_write_en), .id_mem_to_reg_sel(id_mem_to_reg_sel),
         .id_alu_op_sel(id_alu_op_sel), .id_alu_src_sel(id_alu_src_sel),
         .id_branch_en(id_branch_en), .id_jal_en(id_jal_en), .id_jalr_en(id_jalr_en),
-        .id_auipc_en(id_auipc_en), .id_rs1_used(id_rs1_used), .id_rs2_used(id_rs2_used)
+        .id_auipc_en(id_auipc_en), .id_csr_en(id_csr_en), .id_valid_inst(id_valid_inst),
+        .id_rs1_used(id_rs1_used), .id_rs2_used(id_rs2_used)
     );
+    
+    assign id_csr_addr = id_inst[31:20]; // RISC-V CSR address is always in these bits
 
-    id_ex_reg id_ex_reg_inst (
+    id_ex_reg u_id_ex_reg (
         .clk(clk), .rst_n(rst_n), .flush(id_ex_flush),
         .id_pc(id_pc), .id_read_data1(id_read_data1), .id_read_data2(id_read_data2),
         .id_imm(id_imm), .id_inst(id_inst), .id_rs1(id_rs1), .id_rs2(id_rs2), .id_rd(id_rd_addr),
@@ -102,6 +116,10 @@ module riscv_core (
         .id_branch_en(id_branch_en), .id_jal_en(id_jal_en), .id_jalr_en(id_jalr_en),
         .id_auipc_en(id_auipc_en), .id_rs1_used(id_rs1_used), .id_rs2_used(id_rs2_used),
         
+        // CSR connections
+        .id_csr_en(id_csr_en), .id_csr_addr(id_csr_addr), .id_valid_inst(id_valid_inst),
+        .ex_csr_en(ex_csr_en), .ex_csr_addr(ex_csr_addr), .ex_valid_inst(ex_valid_inst),
+
         .ex_pc(ex_pc), .ex_read_data1(ex_read_data1), .ex_read_data2(ex_read_data2),
         .ex_imm(ex_imm), .ex_inst(ex_inst), .ex_rs1(ex_rs1), .ex_rs2(ex_rs2), .ex_rd(ex_rd_addr),
         .ex_alu_op_sel(ex_alu_op_sel), .ex_alu_src_sel(ex_alu_src_sel), .ex_reg_write_en(ex_reg_write_en),
@@ -114,19 +132,22 @@ module riscv_core (
     execute_stage u_execute_stage (
         .ex_pc(ex_pc), .ex_read_data1(ex_read_data1), .ex_read_data2(ex_read_data2),
         .ex_imm(ex_imm), .ex_inst(ex_inst), 
+        .ex_csr_rdata(csr_rdata_wire), .ex_csr_en(ex_csr_en), // NEW CSR INPUTS
         .mem_forward_data(mem_mem_to_reg_sel ? mem_rd_data : mem_alu_res), .wb_forward_data(wb_final_data),
         .forward_a_sel(forward_a_sel), .forward_b_sel(forward_b_sel),
         .ex_alu_op_sel(ex_alu_op_sel), .ex_alu_src_sel(ex_alu_src_sel),
         .ex_branch_en(ex_branch_en), .ex_jal_en(ex_jal_en), .ex_jalr_en(ex_jalr_en),
         .ex_auipc_en(ex_auipc_en), 
         .ex_branch_target(ex_branch_target), .ex_alu_result(ex_alu_res),
+        .ex_rs1_fwd_out(ex_rs1_fwd_out), // EXPORT rs1 for CSR writes
         .ex_write_data_mem(ex_wr_data_mem), .ex_alu_zero(ex_alu_zero)
     );
 
-    ex_mem_reg ex_mem_reg_inst (
+    ex_mem_reg u_ex_mem_reg_inst (
         .clk(clk), .rst_n(rst_n), .flush(ex_mem_flush),
         .ex_alu_result(ex_alu_res), .ex_write_data(ex_wr_data_mem), .ex_branch_target(ex_branch_target),
         .ex_rd_addr(ex_rd_addr), .ex_funct3(ex_inst[14:12]), .ex_alu_zero(ex_alu_zero),
+        .ex_valid_inst(ex_valid_inst), .mem_valid_inst(mem_valid_inst), // CSR VALID PIPELINING
         .ex_reg_write_en(ex_reg_write_en), .ex_mem_to_reg_sel(ex_mem_to_reg_sel),
         .ex_mem_read_en(ex_mem_read_en), .ex_mem_write_en(ex_mem_write_en),
         .ex_branch_en(ex_branch_en), .ex_jal_en(ex_jal_en), .ex_jalr_en(ex_jalr_en),
@@ -150,9 +171,10 @@ module riscv_core (
         .mem_branch_taken(mem_branch_taken)
     );
 
-    mem_wb_reg mem_wb_reg_inst (
+    mem_wb_reg u_mem_wb_reg_inst (
         .clk(clk), .rst_n(rst_n),
         .mem_alu_res(mem_alu_res), .mem_mem_data(mem_rd_data), .mem_rd_addr(mem_rd_addr),
+        .mem_valid_inst(mem_valid_inst), .wb_valid_inst(wb_valid_inst), // CSR VALID PIPELINING
         .mem_reg_write_en(mem_reg_write_en), .mem_mem_to_reg_sel(mem_mem_to_reg_sel),
         .wb_alu_res(wb_alu_res), .wb_mem_data(wb_mem_data), .wb_rd_addr(wb_rd_addr),
         .wb_reg_write_en(wb_reg_write_en), .wb_mem_to_reg_sel(wb_mem_to_reg_sel)
@@ -177,6 +199,17 @@ module riscv_core (
         .ex_mem_read_en(ex_mem_read_en), .jump_branch_taken(actual_jump),
         .if_pc_en(if_pc_en), .id_reg_en(id_reg_en), .id_ex_flush(id_ex_flush), .if_id_flush(if_id_flush),
         .ex_mem_flush(ex_mem_flush)
+    );
+
+    // [CSR SYSTEM]
+    csr_unit u_csr_unit (
+        .clk           (clk),
+        .rst_n         (rst_n),
+        .inst_retired  (wb_valid_inst),    // Now triggered from final Writeback stage
+        .csr_we        (ex_csr_en),     
+        .csr_addr      (ex_csr_addr),   
+        .csr_wdata     (ex_rs1_fwd_out),    // rs1 value after forwarding
+        .csr_rdata     (csr_rdata_wire) 
     );
 
 endmodule

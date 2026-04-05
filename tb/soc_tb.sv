@@ -38,19 +38,30 @@ module soc_tb();
         $display("\n[TB] System Reset Released. Validation Started...");
     end
 
-    // --- 4. Hierarchical Spying ---
-    // We create local wires to tap into the internal SoC bus signals.
-    // This avoids "Part Select" errors in some simulators.
+    // --- 4. Waveform Generation ---
+    // This block tells Icarus Verilog to record everything for GTKWave
+    initial begin
+        $dumpfile("sim/waves.fst");
+        $dumpvars(0, soc_tb);
+    end
+
+    // --- 5. Hierarchical Spying (UART & CSR) ---
     logic        spy_uart_we;
     logic        spy_uart_sel;
     logic [31:0] spy_bus_wdata;
-
+    
+    // Tap into the System Bus for UART monitoring
     assign spy_uart_we   = uut.uart_we;
     assign spy_uart_sel  = uut.uart_sel;
     assign spy_bus_wdata = uut.data_wdata;
 
-    // --- 5. UART Output Collector ---
-    // Captures characters sent by the CPU to the UART register.
+    // Tap into the CPU's Execute stage to watch CSR reads
+    logic        spy_csr_en;
+    logic [31:0] spy_csr_rdata;
+    assign spy_csr_en    = uut.u_core.u_execute_stage.ex_csr_en;
+    assign spy_csr_rdata = uut.u_core.u_execute_stage.ex_csr_rdata;
+
+    // --- 6. Verification Logic ---
     logic [7:0] char_history [0:15]; 
     int char_count = 0;
     
@@ -59,7 +70,13 @@ module soc_tb();
         
         forever @(posedge clk) begin
             if (rst_n) begin
-                // Monitor Bus writes to the UART address space
+                // A. CSR Read Monitor
+                // If a CSR is being read in the EX stage, print its value.
+                if (spy_csr_en) begin
+                    $display("[MONITOR] CSR Read Detected. Value retrieved: %0d", spy_csr_rdata);
+                end
+
+                // B. UART Output Monitor
                 if (spy_uart_we && spy_uart_sel) begin
                     if (char_count < 16) begin
                         char_history[char_count] = spy_bus_wdata[7:0];
@@ -69,21 +86,19 @@ module soc_tb();
                     $write("%c", spy_bus_wdata[7:0]);
                 end
 
-                // Detect End of Program (Parking Loop)
-            
-                // Detection of Program End (Parking Loop)
+                // C. Detect End of Program (Parking Loop)
                 if (uut.u_core.actual_jump && (uut.u_core.final_branch_addr == (uut.u_core.ex_pc - 4))) begin
                     $display("\n\n**************************************************");
-                    $display("      FINAL RV32I COMPLIANCE SUMMARY");
+                    $display("      CSR PERFORMANCE TEST SUMMARY");
                     $display("**************************************************");
                     $write("  CPU Output: ");
                     for (int i = 0; i < char_count; i++) $write("%c", char_history[i]);
                     $display("");
                     
                     if (char_count >= 4 && char_history[0] == 8'h50 && char_history[1] == 8'h41) begin
-                        $display("  RESULT: [SUCCESS] - LB/SB and Forwarding are OK! 🎉");
+                        $display("  RESULT: [SUCCESS] - CSR Counters & Logic passed! 🎉");
                     end else begin
-                        $display("  RESULT: [FAILURE] - Mismatch in data or branch logic.");
+                        $display("  RESULT: [FAILURE] - The CSR values did not change correctly.");
                     end
                     $display("**************************************************\n");
                     $finish;
@@ -92,7 +107,7 @@ module soc_tb();
         end
     end
 
-    // --- 6. Safety Timeout ---
+    // --- 7. Safety Timeout ---
     initial begin 
         #2000000; 
         $display("\n[TIMEOUT] Simulation exceeded time limit. Check for stalls."); 

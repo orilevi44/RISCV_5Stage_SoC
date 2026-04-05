@@ -1,10 +1,7 @@
 `timescale 1ns / 1ps
 
 /**
- * Execute Stage
- * -------------------
- * This version includes the missing 'ex_branch_en' port and fixes
- * Icarus Verilog 'constant select' warnings.
+ * Execute Stage - Updated for CSR Support
  */
 module execute_stage (
     input  logic [31:0] ex_pc,
@@ -13,6 +10,10 @@ module execute_stage (
     input  logic [31:0] ex_imm,
     input  logic [31:0] ex_inst,
     
+    // CSR Inputs
+    input  logic [31:0] ex_csr_rdata,    // Data read from CSR unit
+    input  logic        ex_csr_en,       // Control signal: this is a CSR instruction
+
     // Forwarding inputs
     input  logic [31:0] mem_forward_data, 
     input  logic [31:0] wb_forward_data,  
@@ -25,11 +26,12 @@ module execute_stage (
     input  logic        ex_jal_en,   
     input  logic        ex_jalr_en,   
     input  logic        ex_auipc_en,
-    input  logic        ex_branch_en,     // ADDED: This fixes the port error
+    input  logic        ex_branch_en,
 
     // Outputs
     output logic [31:0] ex_branch_target,
-    output logic [31:0] ex_alu_result,
+    output logic [31:0] ex_alu_result,    // Final result to be passed down the pipe
+    output logic [31:0] ex_rs1_fwd_out,   // RS1 value after forwarding (for CSR writes)
     output logic [31:0] ex_write_data_mem,
     output logic        ex_alu_zero
 );
@@ -40,13 +42,13 @@ module execute_stage (
     logic [3:0]  alu_ctrl_wire; 
     logic [31:0] alu_raw_out;   
 
-    // Local wires to avoid Icarus 'constant select' errors
+    // Local wires to avoid Icarus warnings
     logic [2:0] f3;
     logic       f7_bit;
     assign f3     = ex_inst[14:12];
     assign f7_bit = ex_inst[30];
 
-    // 1. Operand A Selection (Logic for AUIPC vs RS1)
+    // 1. Operand A Selection (Logic for AUIPC vs RS1 with Forwarding)
     always_comb begin
         if (ex_auipc_en) begin
             alu_in1 = ex_pc;
@@ -59,6 +61,9 @@ module execute_stage (
             endcase
         end
     end
+    
+    // Export the forwarded RS1 value so the CSR unit can use it for writes
+    assign ex_rs1_fwd_out = alu_in1;
 
     // 2. Operand B Selection (Forwarding rs2)
     always_comb begin
@@ -79,8 +84,20 @@ module execute_stage (
     // 5. Data to be stored in RAM
     assign ex_write_data_mem = alu_rs2_fwd;
 
-    // 6. Writeback Selection (ALU vs Jump Link)
-    assign ex_alu_result = (ex_jal_en || ex_jalr_en) ? (ex_pc + 32'd4) : alu_raw_out;
+    // 6. Final Result Selection (The core CSR update)
+    // We choose between:
+    // a. CSR data (if it's a CSR instruction)
+    // b. Link address (if it's a Jump)
+    // c. ALU output (for everything else)
+    always_comb begin
+        if (ex_csr_en) begin
+            ex_alu_result = ex_csr_rdata;
+        end else if (ex_jal_en || ex_jalr_en) begin
+            ex_alu_result = ex_pc + 32'd4;
+        end else begin
+            ex_alu_result = alu_raw_out;
+        end
+    end
 
     // Sub-module Instances
     alu_control alu_control_unit (

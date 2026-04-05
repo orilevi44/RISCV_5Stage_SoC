@@ -47,7 +47,16 @@ module id_ex_reg (
     output logic        ex_jalr_en,
     output logic        ex_auipc_en,       // Added for AUIPC
     output logic        ex_rs1_used,
-    output logic        ex_rs2_used
+    output logic        ex_rs2_used,
+
+    // CSR Signals
+    input  logic [11:0] id_csr_addr,
+    input  logic        id_csr_en,
+    input  logic        id_valid_inst,
+    
+    output logic [11:0] ex_csr_addr,
+    output logic        ex_csr_en,
+    output logic        ex_valid_inst
 );
 
     always_ff @(posedge clk or negedge rst_n) begin
@@ -70,6 +79,9 @@ module id_ex_reg (
             ex_jal_en         <= 1'b0;
             ex_jalr_en        <= 1'b0;
             ex_auipc_en       <= 1'b0;
+            ex_csr_addr       <= 12'b0;
+            ex_csr_en         <= 1'b0;
+            ex_valid_inst     <= 1'b0;
             ex_rs1_used       <= 1'b0;
             ex_rs2_used       <= 1'b0;
         end else begin
@@ -91,6 +103,9 @@ module id_ex_reg (
             ex_jal_en         <= id_jal_en;
             ex_jalr_en        <= id_jalr_en;
             ex_auipc_en       <= id_auipc_en;
+            ex_csr_addr       <= id_csr_addr;
+            ex_csr_en         <= id_csr_en;
+            ex_valid_inst     <= id_valid_inst;
             ex_rs1_used       <= id_rs1_used;
             ex_rs2_used       <= id_rs2_used;
         end
