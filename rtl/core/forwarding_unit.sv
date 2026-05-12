@@ -65,15 +65,15 @@ module forwarding_unit (
     end
 
     // --- Debug Monitors for Simulation ---
-    always @(posedge clk) begin
-        if (forward_a_sel == 2'b10) 
-            $display("[FWD] MEM Hazard detected on rs1 (x%0d). Bypassing data!", ex_rs1);
-        if (forward_b_sel == 2'b10) 
-            $display("[FWD] MEM Hazard detected on rs2 (x%0d). Bypassing data!", ex_rs2);
-        if (forward_a_sel == 2'b01) 
-            $display("[FWD] WB Hazard detected on rs1 (x%0d). Bypassing data!", ex_rs1);
-        if (forward_b_sel == 2'b01) 
-            $display("[FWD] WB Hazard detected on rs2 (x%0d). Bypassing data!", ex_rs2);
-    end
+    // always @(posedge clk) begin
+    //     if (forward_a_sel == 2'b10) 
+    //         $display("[FWD] MEM Hazard detected on rs1 (x%0d). Bypassing data!", ex_rs1);
+    //     if (forward_b_sel == 2'b10) 
+    //         $display("[FWD] MEM Hazard detected on rs2 (x%0d). Bypassing data!", ex_rs2);
+    //     if (forward_a_sel == 2'b01) 
+    //         $display("[FWD] WB Hazard detected on rs1 (x%0d). Bypassing data!", ex_rs1);
+    //     if (forward_b_sel == 2'b01) 
+    //         $display("[FWD] WB Hazard detected on rs2 (x%0d). Bypassing data!", ex_rs2);
+    // end
 
 endmodule

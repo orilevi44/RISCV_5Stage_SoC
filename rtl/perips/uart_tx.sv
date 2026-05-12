@@ -7,7 +7,7 @@
  */
 module uart_tx #(
     parameter CLK_FREQ = 100_000_000, // Default 100MHz
-    parameter BAUD_RATE = 115_200
+    parameter BAUD_RATE = 12_500_000 
 )(
     input  logic       clk,
     input  logic       rst_n,

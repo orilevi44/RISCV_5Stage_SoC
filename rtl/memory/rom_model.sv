@@ -1,7 +1,8 @@
-/**
- * Instruction ROM Module - Asynchronous Read
- * This matches the timing expected by the RISC-V Pipeline.
- */
+`timescale 1ns / 1ps
+
+// Instruction ROM — 4 KB (1024 × 32-bit words), base address 0x0000
+// Asynchronous read: instruction is available in the same cycle the PC changes.
+// Returns NOP (0x00000013) when chip-enable is low.
 module rom_model (
     input  logic [31:0] addr, // Address from CPU
     input  logic        en,   // Chip enable
@@ -10,9 +11,7 @@ module rom_model (
 
     logic [31:0] mem [0:1023]; // 4KB ROM
 
-    // Asynchronous Read: No 'always_ff' here!
-    // This ensures that as soon as the PC changes, 
-    // the instruction is ready for the Fetch stage.
+    // Combinational read — no clock edge needed; addr[11:2] selects the word
     assign rd_data = (en) ? mem[addr[11:2]] : 32'h00000013; // Return NOP if disabled
 
 endmodule

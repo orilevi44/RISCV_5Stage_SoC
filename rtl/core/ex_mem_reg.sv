@@ -1,9 +1,13 @@
 `timescale 1ns / 1ps
 
+// EX/MEM Pipeline Register
+// Latches ALU result, write data, and control signals from Execute into Memory.
+// On flush, ALL fields are zeroed (not just control) to avoid spurious bus activity.
 module ex_mem_reg (
     input  logic         clk,
     input  logic         rst_n,
     input  logic         flush,
+    input  logic         en,
     
     // Inputs from EX Stage
     input  logic [31:0]  ex_alu_result,
@@ -60,17 +64,31 @@ module ex_mem_reg (
             mem_jalr_en         <= 1'b0;
         end 
         else if (flush) begin
-            // Clear control and validity on flush
+            // FIX: Zero ALL fields on flush — not just control signals.
+            // Leaving mem_alu_result intact with a stale value causes the
+            // system bus to decode a spurious peripheral address.  In our
+            // echo program, lbu t2,0(t0) sits in EX when beqz resolves in
+            // MEM.  Its computed address (0x3000) is captured into
+            // mem_alu_result even though ex_mem_flush=1.  The next cycle
+            // data_mem_addr=0x3000 → uart_sel=1, we=0 → uart_wrapper fires
+            // data_read_done → rx_valid_sticky is cleared, losing the byte.
+            // All outputs must be zero so the flushed NOP has no side effects.
+            mem_alu_result      <= 32'b0;
+            mem_write_data      <= 32'b0;
+            mem_branch_target   <= 32'b0;
+            mem_rd_addr         <= 5'b0;
+            mem_funct3          <= 3'b0;
+            mem_alu_zero        <= 1'b0;
             mem_valid_inst      <= 1'b0;
             mem_reg_write_en    <= 1'b0;
+            mem_mem_to_reg_sel  <= 1'b0;
             mem_mem_read_en     <= 1'b0;
             mem_mem_write_en    <= 1'b0;
             mem_branch_en       <= 1'b0;
             mem_jal_en          <= 1'b0;
             mem_jalr_en         <= 1'b0;
-            // Target and result can stay for logic stability
-        end 
-        else begin
+        end
+        else if (en) begin
             mem_alu_result      <= ex_alu_result;
             mem_write_data      <= ex_write_data;
             mem_branch_target   <= ex_branch_target;

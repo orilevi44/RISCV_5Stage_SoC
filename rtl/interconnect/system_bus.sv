@@ -1,78 +1,59 @@
-/**
- * System Bus Interconnect
- * Purpose: Decodes the CPU address and routes data/control signals 
- * to the appropriate peripheral (ROM, RAM, GPIO, or UART).
- */
 `timescale 1ns / 1ps
 
+// System Bus — address decoder for the SoC data bus.
+// Routes CPU read/write to the correct peripheral based on address.
+// Peripheral selects are asserted on address match alone (not gated on re/we).
+//
+// Bug fix note: the original code gated uart_sel/gpio_sel/ram_sel on (we || re).
+// During a load-use bubble the hazard unit zeroes re for one cycle, so uart_sel
+// would drop and the UART wrapper would return 0 instead of the real status.
+// Fix: assert sel purely on address decode; each peripheral gates its own output.
 module system_bus (
-    // Interface with RISC-V Core
-    input  logic [31:0] addr,       // Address from CPU
-    input  logic [31:0] wdata,      // Data to be written
-    input  logic        we,         // Master Write Enable from CPU
-    output logic [31:0] rdata,      // Multiplexed read data back to CPU
-
-    // ROM (Instruction Memory: 0x0000 - 0x0FFF)
+    input  logic [31:0] addr,
+    input  logic [31:0] wdata,
+    input  logic        we,
+    input  logic        re,
+    output logic [31:0] rdata,
     output logic        rom_sel,
     input  logic [31:0] rom_rdata,
-
-    // RAM (Data Memory: 0x2000 - 0x2FFF)
     output logic        ram_sel,
-    output logic        ram_we,     // Gated WE for RAM
+    output logic        ram_we,
     input  logic [31:0] ram_rdata,
-
-    // GPIO (Peripheral: 0x1000)
     output logic        gpio_sel,
-    output logic        gpio_we,    // Gated WE for GPIO
+    output logic        gpio_we,
     input  logic [31:0] gpio_rdata,
-    
-    // UART (Peripheral: 0x3000 - 0x300F)
     output logic        uart_sel,
-    output logic        uart_we,    // Gated WE for UART
+    output logic        uart_we,
     input  logic [31:0] uart_rdata
 );
 
-    /**
-     * Address Decoding Logic
-     * Routes signals based on the defined Memory Map.
-     */
     always_comb begin
+        rom_sel  = 1'b0; ram_sel  = 1'b0; ram_we   = 1'b0;
+        gpio_sel = 1'b0; gpio_we  = 1'b0; uart_sel = 1'b0;
+        uart_we  = 1'b0; rdata    = 32'b0;
 
-        // Default values to prevent latches and unintended writes
-        rom_sel  = 1'b0;
-        ram_sel  = 1'b0;
-        ram_we   = 1'b0;
-        gpio_sel = 1'b0;
-        gpio_we  = 1'b0;
-        uart_sel = 1'b0; 
-        uart_we  = 1'b0;
-        rdata    = 32'b0;
-
-        // --- ROM Decoding (0x0000_0000 - 0x0000_0FFF) ---
+        // ROM Decoding
         if (addr >= 32'h0000_0000 && addr <= 32'h0000_0FFF) begin
             rom_sel = 1'b1;
             rdata   = rom_rdata;
         end
-        
-        // --- GPIO Decoding (Exactly 0x0000_1000) ---
+        // GPIO Decoding — sel asserted on address match, not gated on re/we
         else if (addr == 32'h0000_1000) begin
-            gpio_sel = 1'b1;
-            gpio_we  = we; // Only allow write if address matches
+            gpio_sel = 1'b1;   // FIX: was (we || re)
+            gpio_we  = we;
             rdata    = gpio_rdata;
         end
-        
-        // --- RAM Decoding (0x0000_2000 - 0x0000_2FFF) ---
+        // RAM Decoding — sel asserted on address match, not gated on re/we
         else if (addr >= 32'h0000_2000 && addr <= 32'h0000_2FFF) begin
-            ram_sel = 1'b1;
-            ram_we  = we; 
+            ram_sel = 1'b1;    // FIX: was (we || re)
+            ram_we  = we;
             rdata   = ram_rdata;
         end
-        
-        // --- UART Decoding (0x0000_3000 - 0x0000_300F) ---
+        // UART Decoding — sel asserted on address match, not gated on re/we
         else if (addr >= 32'h0000_3000 && addr <= 32'h0000_300F) begin
-            uart_sel = 1'b1;
+            uart_sel = 1'b1;   // FIX: was (we || re)
             uart_we  = we;
-            rdata    = uart_rdata; 
+            rdata    = uart_rdata ;
         end
     end
 

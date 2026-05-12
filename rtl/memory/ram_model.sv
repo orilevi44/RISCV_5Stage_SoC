@@ -1,6 +1,8 @@
-/**
- * Simple RAM Model for SoC
- */
+`timescale 1ns / 1ps
+
+// RAM Model — 4 KB (1024 × 32-bit words), base address 0x2000
+// Writes are synchronous (clocked). Reads are asynchronous (combinational).
+// Word index = addr[11:2], so bytes within a word are ignored.
 module ram_model (
     input  logic        clk,
     input  logic [31:0] addr,
@@ -19,6 +21,7 @@ module ram_model (
     end
 
     // Asynchronous Read
-    assign rd_data = mem[addr[11:2]];
+    //assign rd_data = mem[addr[11:2]];
+    assign rd_data = (addr[11:2] < 1024) ? mem[addr[11:2]] : 32'h0;
 
 endmodule

@@ -1,5 +1,10 @@
 `timescale 1ns / 1ps
 
+// CSR Unit — Control and Status Registers
+// Implements two read-only performance counters:
+//   mcycle   (0xB00/0xB80) — total clock cycles since reset
+//   minstret (0xB02/0xB82) — instructions retired (completed) since reset
+// Both are 64-bit, split into low/high 32-bit halves.
 module csr_unit (
     input  logic        clk,
     input  logic        rst_n,

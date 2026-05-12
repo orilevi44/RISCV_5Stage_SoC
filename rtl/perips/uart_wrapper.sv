@@ -1,74 +1,88 @@
-/**
- * UART Wrapper Module
- * -------------------
- * This module bridges the System Bus (Memory-Mapped I/O) to the UART Transmitter.
- * * Memory Map (Offsets from Base 0x3000):
- * - 0x0: Data Register (Write-Only) -> Writing here starts a transmission.
- * - 0x4: Status Register (Read-Only) -> Bit [0] indicates if UART is busy (1=Busy, 0=Idle).
- */
 `timescale 1ns / 1ps
 
+// UART Wrapper — Memory-mapped register interface around the TX and RX PHY units.
+// Register map (relative to base address):
+//   offset 0x0  write → send byte (ignored if tx_busy)
+//   offset 0x0  read  → received byte (clears rx_valid on read)
+//   offset 0x4  read  → status: bit[0]=rx_valid, bit[1]=tx_busy
 module uart_wrapper #(
     parameter CLK_FREQ  = 100_000_000,
-    parameter BAUD_RATE = 115_200
+    parameter BAUD_RATE = 12_500_000
 )(
-    input  logic        clk,
-    input  logic        rst_n,
-    
-    // --- Interface to System Bus ---
-    input  logic        sel,      // Chip Select (Active when address is in UART range)
-    input  logic        we,       // Write Enable (Active during Store instructions)
-    input  logic [31:0] addr,     // Full 32-bit Address
-    input  logic [31:0] wdata,    // Write Data from CPU
-    output logic [31:0] rdata,    // Read Data to CPU
-    
-    // --- External Physical Pin ---
-    output logic        uart_txd  // Physical TX Line
+    input  logic         clk,
+    input  logic         rst_n,
+    input  logic         sel,       
+    input  logic         we,    
+    input  logic         re,    
+    input  logic [31:0]  addr,      
+    input  logic [31:0]  wdata,     
+    output logic [31:0]  rdata,     
+    output logic         uart_txd,  
+    input  logic         uart_rxd   
 );
 
-    // Internal signals
-    logic       tx_en;
-    logic       tx_busy;
+    // --- Internal Registers & Signals ---
+    logic [7:0] tx_data_reg; 
+    logic [7:0] rx_data_reg;
+    logic       tx_en, tx_busy;
+    logic [7:0] rx_phy_data;
+    logic       rx_valid_pulse, rx_valid_sticky, rx_clear;
     logic [3:0] addr_offset;
+    
+    logic       reading_rx_data;
 
-    // Extract the lower 4 bits of the address for register selection
     assign addr_offset = addr[3:0];
+    assign reading_rx_data = sel && re && !we && (addr_offset == 4'h0);
 
-    // 1. Instantiate the physical UART Transmitter (UART PHY)
-    uart_tx #(
-        .CLK_FREQ(CLK_FREQ),
-        .BAUD_RATE(BAUD_RATE)
-    ) u_tx_phy (
-        .clk      (clk),
-        .rst_n    (rst_n),
-        .tx_data  (wdata[7:0]), // Map lowest byte of word to UART data
-        .tx_en    (tx_en),
-        .tx_busy  (tx_busy),
-        .uart_txd (uart_txd)
+    // --- PHY Units Instantiation ---
+    uart_tx #(.CLK_FREQ(CLK_FREQ), .BAUD_RATE(BAUD_RATE)) u_tx_phy (
+        .clk(clk), .rst_n(rst_n), .tx_data(tx_data_reg), 
+        .tx_en(tx_en), .tx_busy(tx_busy), .uart_txd(uart_txd)
     );
 
-    /**
-     * Bus Interface Logic
-     * Uses a case statement for cleaner address decoding,
-     * resolving the "constant selects" simulation warning.
-     */
+    uart_rx #(.CLK_FREQ(CLK_FREQ), .BAUD_RATE(BAUD_RATE)) u_rx_phy (
+        .clk(clk), .rst_n(rst_n), .uart_rxd(uart_rxd),
+        .rx_clear(rx_clear), .rx_data(rx_phy_data), .rx_valid(rx_valid_pulse)
+    );
+
+    // --- Control Logic ---
+    always_ff @(posedge clk or negedge rst_n) begin
+        if (!rst_n) begin
+            rx_valid_sticky <= 1'b0;
+            rx_data_reg     <= 8'b0;
+            tx_data_reg     <= 8'b0;
+            tx_en           <= 1'b0;
+            rx_clear        <= 1'b0;
+        end else begin
+            tx_en    <= 1'b0;
+            rx_clear <= 1'b0;
+
+            // Bus Transactions (Write to TX)
+            if (sel && we && (addr_offset == 4'h0) && !tx_busy) begin
+                tx_en       <= 1'b1;
+                tx_data_reg <= wdata[7:0];
+            end
+
+            // RX Sticky Bit Logic
+            if (rx_valid_pulse) begin
+                rx_valid_sticky <= 1'b1;
+                rx_data_reg     <= rx_phy_data;
+            end 
+            else if (reading_rx_data) begin
+                rx_valid_sticky <= 1'b0;
+                rx_clear        <= 1'b1; 
+            end
+        end
+    end
+
+    // --- Bus Read Multiplexer ---
+    // Drives rdata only on a genuine read cycle (sel && re && !we).
     always_comb begin
-        // Default values to avoid latches
-        tx_en = 1'b0;
         rdata = 32'b0;
-        
-        if (sel) begin
+        if (sel && re && !we) begin
             case (addr_offset)
-                // Register 0x0: Data Transmission
-                4'h0: begin
-                    if (we) tx_en = 1'b1;
-                end
-                
-                // Register 0x4: Status Check
-                4'h4: begin
-                    if (!we) rdata = {31'b0, tx_busy};
-                end
-                
+                4'h0: rdata = {24'b0, rx_data_reg};                // RX data register
+                4'h4: rdata = {30'b0, tx_busy, rx_valid_sticky};   // Status: [1]=tx_busy, [0]=rx_valid
                 default: rdata = 32'b0;
             endcase
         end

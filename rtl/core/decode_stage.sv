@@ -49,6 +49,9 @@ module decode_stage (
     output logic        id_valid_inst
 );
 
+    logic [6:0] opcode;
+    assign opcode = if_id_inst[6:0];
+
     // --- Field Extraction ---
     // Force rs1 to x0 for LUI instructions so the ALU adds 0 + Immediate
     assign id_rs1    = (opcode == 7'b0110111) ? 5'b0 : if_id_inst[19:15];
@@ -56,8 +59,6 @@ module decode_stage (
     assign id_rd     = if_id_inst[11:7];
     assign id_funct3 = if_id_inst[14:12]; 
 
-    logic [6:0] opcode;
-    assign opcode = if_id_inst[6:0];
 
     // A valid instruction is anything that isn't a zeroed-out NOP
     assign id_valid_inst = (if_id_inst != 32'h00000013) && (opcode != 7'b0);

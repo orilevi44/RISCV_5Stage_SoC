@@ -1,0 +1,52 @@
+
+
+Hello! I am working on a custom 32-bit RISC-V System-on-Chip (SoC) written in SystemVerilog. The project features a 5-stage pipelined CPU core with full hazard detection and data forwarding, connected via a system bus to internal memory and peripherals. 
+
+The project is fully verified, and the current state includes a working UART echo test. Before we start working on specific tasks, I want to provide you with the project's folder structure and architecture so you understand the context and separation of concerns.
+
+### **Memory Map:**
+* `0x0000 - 0x0FFF`: ROM (Instructions)
+* `0x1000 - 0x1FFF`: GPIO
+* `0x2000 - 0x2FFF`: RAM (Data)
+* `0x3000 - 0x300F`: UART (0x3000: RX/TX Data, 0x3004: Status Register)
+
+### **Project Directory Structure:**
+
+RISCV_Project/
+?
+??? rtl/                        <- Synthesizable hardware only
+?   ??? soc_top.sv              <- Top-level integration (CPU + Bus + Peripherals)
+?   ??? core/                   <- CPU Microarchitecture
+?   ?   ??? riscv_core.sv       <- CPU top wrapper
+?   ?   ??? fetch_stage.sv, decode_stage.sv, execute_stage.sv, memory_stage.sv, writeback_stage.sv
+?   ?   ??? if_id_reg.sv, id_ex_reg.sv, ex_mem_reg.sv, mem_wb_reg.sv
+?   ?   ??? alu.sv, alu_control.sv, reg_file.sv, imm_gen.sv, pc_reg.sv
+?   ?   ??? forwarding_unit.sv, hazard_detection_unit.sv, csr_unit.sv
+?   ??? interconnect/           <- Bus and address decoding
+?   ?   ??? system_bus.sv       <- Routes CPU to ROM/RAM/GPIO/UART
+?   ??? memory/                 <- SRAM/ROM models
+?   ?   ??? rom_model.sv
+?   ?   ??? ram_model.sv
+?   ??? perips/                 <- Peripherals
+?       ??? uart_wrapper.sv     <- Memory-mapped register interface
+?       ??? uart_tx.sv, uart_rx.sv <- Physical UART PHYs
+?       ??? gpio.sv
+?
+??? tb/                         <- Simulation testbenches (Never synthesized)
+?   ??? echo_test_tb.sv         <- Main A/B/C UART echo testbench
+?   ??? soc_tb.sv, riscv_tb.sv, uart_wrapper_tb.sv
+?
+??? sim/                        <- Simulation data and outputs
+?   ??? program.hex             <- Machine code loaded into ROM
+?   ??? program.asm             <- Assembly reference
+?   ??? waves.fst               <- Waveform output (ignored in git)
+?
+??? draws/                      <- Documentation and architecture block diagrams
+??? run_echo_test.bat           <- Build and simulation script (Icarus Verilog)
+
+### **Guidelines for our conversation:**
+1. Keep the separation of concerns strictly intact. Do not mix RTL logic with simulation (`tb`) logic.
+2. The `system_bus.sv` uses strict address decoding (independent of `re`/`we` signals) to prevent drops during pipeline load-use hazard stall bubbles.
+3. If you need to see the exact implementation of any specific module before providing a solution, please ask me to provide the code for that file.
+
+Let me know if you understand this architecture, and then I will give you our first task!

@@ -3,6 +3,7 @@ soc_sim
 *.vvp
 *.vcd
 *.fst
+*.hier
 a.out
 *.log
 

@@ -1,10 +1,13 @@
 `timescale 1ns / 1ps
 
+// IF/ID Pipeline Register
+// Latches PC and instruction from the Fetch stage into the Decode stage.
+// Supports stall (en=0 freezes) and flush (inserts NOP on branch/jump).
 module if_id_reg (
     input  logic        clk,
     input  logic        rst_n,
-    input  logic        flush,          // Clear on Control Hazard
-    input  logic        en,             // Stall for Data Hazard
+    input  logic        flush,
+    input  logic        en,
 
     input  logic [31:0] if_pc,          
     input  logic [31:0] if_inst,        

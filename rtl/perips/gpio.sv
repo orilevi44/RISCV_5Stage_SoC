@@ -1,7 +1,9 @@
+`timescale 1ns / 1ps
 /**
  * GPIO Module
  * Memory-mapped I/O for controlling external SoC pins.
  */
+
 module gpio (
     input  logic        clk,
     input  logic        rst_n,
