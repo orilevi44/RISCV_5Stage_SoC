@@ -1,23 +1,23 @@
 `timescale 1ns / 1ps
 
 // RISC-V Core — 5-Stage Pipeline (IF → ID → EX → MEM → WB)
-// Instantiates every pipeline stage, register, and control unit.
-// Exposes a simple instruction-memory port and a data-memory port to soc_top.
 module riscv_core (
-    input  logic         clk,
-    input  logic         rst_n,
+    input  logic        clk,
+    input  logic        rst_n,
+    
+    input  logic        ext_intr, // NEW: External Interrupt from PIC
     
     // Instruction Memory Interface
-    output logic [31:0]  instr_mem_addr,
-    input  logic [31:0]  instr_mem_data,
-    input  logic         instr_mem_ready,
+    output logic [31:0] instr_mem_addr,
+    input  logic [31:0] instr_mem_data,
+    input  logic        instr_mem_ready,
 
     // Data Memory Interface
-    output logic [31:0]  data_mem_addr,
-    output logic [31:0]  data_mem_wr_data,
-    output logic         data_mem_wr_en,
-    output logic         data_mem_rd_en, 
-    input  logic [31:0]  data_mem_rd_data
+    output logic [31:0] data_mem_addr,
+    output logic [31:0] data_mem_wr_data,
+    output logic        data_mem_wr_en,
+    output logic        data_mem_rd_en, 
+    input  logic [31:0] data_mem_rd_data
 );
 
     // --- 1. Internal Pipeline Wires ---
@@ -40,7 +40,13 @@ module riscv_core (
     logic [2:0]  ex_alu_op_sel;
     logic        id_ex_flush, ex_rs1_used, ex_rs2_used;
     logic        ex_auipc_en, ex_csr_en, ex_valid_inst;
-    logic [31:0] ex_csr_rdata;
+    
+    // New EX wires for CSR and Interrupts
+    logic [31:0] ex_csr_rdata, ex_rs1_fwd_out;
+    logic        ex_mret_exec, ex_csr_we;
+    logic        take_trap;
+    logic [31:0] trap_target, epc_out;
+    logic        trap_or_mret_flush;
 
     logic [31:0] mem_alu_res, mem_wr_data, mem_rd_data, mem_branch_target;
     logic [4:0]  mem_rd_addr;
@@ -58,7 +64,34 @@ module riscv_core (
     logic [31:0] final_branch_addr;
     logic        actual_jump;
 
-    // Logic for Jump Detection
+    // --- Interrupt & Trap Mux Logic ---
+    
+    // Detect if the instruction in Execute is an 'mret' (Opcode 1110011, Funct3 000)
+    assign ex_mret_exec = (ex_inst[6:0] == 7'b1110011) && (ex_inst[14:12] == 3'b000);
+    
+    // We only write to CSR if it's a CSR instruction AND rs1 is not x0 (0)
+    assign ex_csr_we = ex_csr_en && (ex_inst[19:15] != 5'b00000);
+    
+    // If a trap hits OR an mret is executed, we must flush the front of the pipeline
+    assign trap_or_mret_flush = take_trap || ex_mret_exec;
+
+    // The Master PC Multiplexer (Overrides normal jumps if there is a trap/mret)
+    logic        final_jump_sel;
+    logic [31:0] final_jump_addr;
+
+    always_comb begin
+        if (take_trap) begin
+            final_jump_sel  = 1'b1;
+            final_jump_addr = trap_target; // Jump to ISR
+        end else if (ex_mret_exec) begin
+            final_jump_sel  = 1'b1;
+            final_jump_addr = epc_out;     // Return to saved PC
+        end else begin
+            final_jump_sel  = actual_jump;
+            final_jump_addr = final_branch_addr; // Normal branch/jump
+        end
+    end
+
     assign actual_jump = (mem_branch_taken || mem_jal_en || mem_jalr_en);
 
     // Bus Interface
@@ -70,13 +103,14 @@ module riscv_core (
     // [FETCH]
     fetch_stage u_fetch_unit (
         .clk(clk), .rst_n(rst_n), .en(if_pc_en && !global_stall),
-        .jump_sel(actual_jump), .jump_addr(final_branch_addr),
+        .jump_sel(final_jump_sel), .jump_addr(final_jump_addr), // Updated!
         .icache_addr(instr_mem_addr), .icache_instr(instr_mem_data), .icache_ready(instr_mem_ready),
         .if_pc(if_pc), .if_instr(if_inst), .if_stall(if_stall)
     );
 
     if_id_reg u_if_id_reg (
-        .clk(clk), .rst_n(rst_n), .flush(if_id_flush), .en(id_reg_en && !global_stall),
+        // Add trap flush to standard hazard flush
+        .clk(clk), .rst_n(rst_n), .flush(if_id_flush || trap_or_mret_flush), .en(id_reg_en && !global_stall),
         .if_pc(if_pc), .if_inst(if_inst), .id_pc(id_pc), .id_inst(id_inst)
     );
 
@@ -95,7 +129,8 @@ module riscv_core (
     );
     
     id_ex_reg u_id_ex_reg (
-        .clk(clk), .rst_n(rst_n), .flush(id_ex_flush),.en(!global_stall),
+        // Add trap flush to standard hazard flush
+        .clk(clk), .rst_n(rst_n), .flush(id_ex_flush || trap_or_mret_flush), .en(!global_stall),
         .id_pc(id_pc), .id_read_data1(id_read_data1), .id_read_data2(id_read_data2),
         .id_imm(id_imm), .id_inst(id_inst), .id_rs1(id_rs1), .id_rs2(id_rs2), .id_rd(id_rd_addr),
         .id_alu_op_sel(id_alu_op_sel), .id_alu_src_sel(id_alu_src_sel), .id_reg_write_en(id_reg_write_en),
@@ -121,12 +156,13 @@ module riscv_core (
         .ex_alu_op_sel(ex_alu_op_sel), .ex_alu_src_sel(ex_alu_src_sel),
         .ex_branch_en(ex_branch_en), .ex_jal_en(ex_jal_en), .ex_jalr_en(ex_jalr_en),
         .ex_branch_target(ex_branch_target), .ex_alu_result(ex_alu_res),
+        .ex_rs1_fwd_out(ex_rs1_fwd_out), // Retrieves the forwarded RS1 data!
         .ex_write_data_mem(ex_wr_data_mem), .ex_alu_zero(ex_alu_zero),
         .ex_csr_rdata(ex_csr_rdata), .ex_csr_en(ex_csr_en), .ex_auipc_en(ex_auipc_en)
     );
 
     ex_mem_reg u_ex_mem_reg_inst (
-        .clk(clk), .rst_n(rst_n), .flush(ex_mem_flush),.en(!global_stall),
+        .clk(clk), .rst_n(rst_n), .flush(ex_mem_flush || trap_or_mret_flush),.en(!global_stall),
         .ex_alu_result(ex_alu_res), .ex_write_data(ex_wr_data_mem), .ex_branch_target(ex_branch_target),
         .ex_rd_addr(ex_rd_addr), .ex_funct3(ex_inst[14:12]), .ex_alu_zero(ex_alu_zero), .ex_valid_inst(ex_valid_inst),
         .ex_reg_write_en(ex_reg_write_en), .ex_mem_to_reg_sel(ex_mem_to_reg_sel),
@@ -140,7 +176,6 @@ module riscv_core (
     );
 
     // [MEMORY]
-
     memory_stage u_memory_stage (
         .mem_alu_result(mem_alu_res), .mem_write_data(mem_wr_data),
         .mem_branch_target_in(mem_branch_target),
@@ -153,11 +188,6 @@ module riscv_core (
 
     mem_wb_reg u_mem_wb_reg_inst (
         .clk(clk), .rst_n(rst_n),
-        // During the UART stall cycle, FLUSH (not freeze) the MEM/WB register.
-        // This inserts a NOP into WB so the instruction that was already there
-        // does not get written to the register file a second time on release.
-        // On the next cycle (stall gone), en=1 captures the now-settled
-        // uart_rdata_sync value into WB.
         .flush(uart_stall),
         .en(1'b1),
         .mem_alu_res(mem_alu_res), .mem_mem_data(mem_rd_data), .mem_rd_addr(mem_rd_addr), .mem_valid_inst(mem_valid_inst),
@@ -179,7 +209,6 @@ module riscv_core (
         .forward_a_sel(forward_a_sel), .forward_b_sel(forward_b_sel)
     );
 
-
     hazard_detection_unit u_hazard_detection_unit (
         .id_rs1            (id_rs1),
         .id_rs2            (id_rs2),
@@ -188,7 +217,6 @@ module riscv_core (
         .jump_branch_taken (actual_jump),
         .mem_mem_read_en   (mem_mem_read_en),
         .mem_alu_result    (mem_alu_res),
-        // The FF below captures uart_stall so the HDU can deassert on cycle+1.
         .uart_already_waited (uart_wait_cycle_q),
         .if_pc_en          (if_pc_en),
         .id_reg_en         (id_reg_en),
@@ -198,34 +226,30 @@ module riscv_core (
         .uart_stall        (uart_stall)
     );
 
+    // --- CSR Unit Integration ---
     csr_unit u_csr_unit (
         .clk(clk), .rst_n(rst_n),
         .inst_retired(ex_valid_inst), 
-        .csr_we(1'b0), // No CSR writes for now — read-only path
+        
+        // Software Interface 
+        .csr_we(ex_csr_we),             // Only write if rs1 != 0
         .csr_addr(ex_inst[31:20]),
-        .csr_wdata(32'b0),
-        .csr_rdata(ex_csr_rdata)
+        .csr_wdata(ex_rs1_fwd_out),     // Write data from RS1 (after forwarding!)
+        .csr_rdata(ex_csr_rdata),       // Output to Execute stage Mux
+        
+        // Hardware Trap Interface
+        .current_pc(ex_pc),             // PC to save in mepc
+        .ext_intr(ext_intr),            // Trigger from PIC
+        .mret_exec(ex_mret_exec),       // Triggers restore
+        
+        // Outputs to PC Mux
+        .take_trap(take_trap),
+        .trap_target(trap_target),
+        .epc_out(epc_out)
     );
 
-    // -----------------------------------------------------------------------
-    // UART wait-state state machine
-    //
-    // uart_stall is driven combinatorially by the HDU (uart_stall output).
-    // uart_wait_cycle_q is the one-cycle memory: it goes high the cycle after
-    // uart_stall fires and feeds back into the HDU as uart_already_waited,
-    // causing the HDU to deassert uart_stall on that second cycle.
-    //
-    // Timing diagram (lbu t1, 0(t0) targeting 0x3000):
-    //
-    //  Cycle:             N          N+1        N+2
-    //  lbu in stage:      MEM        MEM        WB
-    //  uart_stall:        1          0          0
-    //  uart_wait_cycle_q: 0          1          0
-    //  uart_rdata_sync:   stale    correct    correct
-    //  mem_wb_reg action: flush    capture      --
-    //  t1 written:                              ✓
-    // -----------------------------------------------------------------------
-    logic uart_stall;       // driven by HDU
+    // --- UART Stall Logic ---
+    logic uart_stall; 
     logic uart_wait_cycle_q;
 
     always_ff @(posedge clk or negedge rst_n) begin
@@ -233,8 +257,6 @@ module riscv_core (
         else        uart_wait_cycle_q <= uart_stall;
     end
 
-    // global_stall freezes every pipeline register except mem_wb_reg
-    // (which is handled separately with a flush to avoid double-writes).
     logic global_stall;
     assign global_stall = uart_stall;
 

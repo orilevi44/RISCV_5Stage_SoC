@@ -3,11 +3,7 @@
 /**
  * Decode Stage
  * -------------------
- * Responsible for:
- * 1. Extracting register addresses (rs1, rs2, rd) and funct3.
- * 2. Instantiating the Register File and Immediate Generator.
- * 3. Generating control signals based on the Opcode.
- * 4. Identifying register usage for Hazard Detection and Forwarding.
+ * Responsible for extracting fields, fetching registers, and generating control signals.
  */
 module decode_stage (
     input  logic        clk,
@@ -33,12 +29,12 @@ module decode_stage (
     output logic        id_mem_read_en,
     output logic        id_mem_write_en,
     output logic        id_mem_to_reg_sel,
-    output logic [2:0]  id_alu_op_sel,    // 3-bit selection for ALU Control
-    output logic        id_alu_src_sel,   // 0 = Register, 1 = Immediate
+    output logic [2:0]  id_alu_op_sel,    
+    output logic        id_alu_src_sel,   
     output logic        id_jal_en,
     output logic        id_jalr_en,
     output logic        id_branch_en,
-    output logic        id_auipc_en,      // New signal for AUIPC logic
+    output logic        id_auipc_en,      
     
     // Status signals for Hazard/Forwarding units
     output logic        id_rs1_used,
@@ -53,14 +49,11 @@ module decode_stage (
     assign opcode = if_id_inst[6:0];
 
     // --- Field Extraction ---
-    // Force rs1 to x0 for LUI instructions so the ALU adds 0 + Immediate
     assign id_rs1    = (opcode == 7'b0110111) ? 5'b0 : if_id_inst[19:15];
     assign id_rs2    = if_id_inst[24:20];
     assign id_rd     = if_id_inst[11:7];
     assign id_funct3 = if_id_inst[14:12]; 
 
-
-    // A valid instruction is anything that isn't a zeroed-out NOP
     assign id_valid_inst = (if_id_inst != 32'h00000013) && (opcode != 7'b0);
 
     // --- Register File Instance ---
@@ -83,7 +76,7 @@ module decode_stage (
 
     // --- Control Signal Generation Logic ---
     always_comb begin
-        // Default values to prevent latches
+        // Default values
         id_reg_write_en   = 1'b0;
         id_mem_read_en    = 1'b0;
         id_mem_write_en   = 1'b0;
@@ -99,91 +92,75 @@ module decode_stage (
         id_rs2_used       = 1'b0;
 
         case (opcode)
-            // R-type (ADD, SUB, AND, OR, XOR, SLL, SRL, SRA, SLT, SLTU)
-            7'b0110011: begin 
+            7'b0110011: begin // R-type
                 id_reg_write_en = 1'b1;
                 id_alu_op_sel   = 3'b010; 
                 id_rs1_used     = 1'b1;
                 id_rs2_used     = 1'b1;
             end
-
-            // I-type ALU (ADDI, ANDI, ORI, XORI, SLTI, SLTIU, SLLI, SRLI, SRAI)
-            7'b0010011: begin 
+            7'b0010011: begin // I-type ALU
                 id_reg_write_en = 1'b1;
                 id_alu_src_sel  = 1'b1;
                 id_alu_op_sel   = 3'b011; 
                 id_rs1_used     = 1'b1;
             end
-
-            // Load Instructions (LB, LH, LW, LBU, LHU)
-            7'b0000011: begin 
+            7'b0000011: begin // Loads
                 id_reg_write_en   = 1'b1;
                 id_mem_read_en    = 1'b1;
                 id_mem_to_reg_sel = 1'b1;
                 id_alu_src_sel    = 1'b1;
-                id_alu_op_sel     = 3'b000; // Performs ADD for address calc
+                id_alu_op_sel     = 3'b000; 
                 id_rs1_used       = 1'b1;
             end
-
-            // Store Instructions (SB, SH, SW)
-            7'b0100011: begin 
+            7'b0100011: begin // Stores
                 id_mem_write_en = 1'b1;
                 id_alu_src_sel  = 1'b1;
-                id_alu_op_sel   = 3'b000; // Performs ADD for address calc
+                id_alu_op_sel   = 3'b000; 
                 id_rs1_used     = 1'b1;
                 id_rs2_used     = 1'b1; 
             end
-
-            // Branch Instructions (BEQ, BNE, BLT, BGE, BLTU, BGEU)
-            7'b1100011: begin 
+            7'b1100011: begin // Branches
                 id_branch_en   = 1'b1;
                 id_alu_op_sel  = 3'b001; 
                 id_rs1_used    = 1'b1;
                 id_rs2_used    = 1'b1;
             end
-
-            // JAL (Jump and Link)
-            7'b1101111: begin 
+            7'b1101111: begin // JAL
                 id_reg_write_en = 1'b1;
                 id_jal_en       = 1'b1;
             end
-
-            // JALR (Jump and Link Register)
-            7'b1100111: begin 
+            7'b1100111: begin // JALR
                 id_reg_write_en = 1'b1;
                 id_jalr_en      = 1'b1;
                 id_alu_src_sel  = 1'b1;
-                id_alu_op_sel   = 3'b000; // Performs ADD for target calc
+                id_alu_op_sel   = 3'b000; 
                 id_rs1_used     = 1'b1;
             end
-            
-            // LUI (Load Upper Immediate)
-            7'b0110111: begin 
+            7'b0110111: begin // LUI
                 id_reg_write_en = 1'b1;
                 id_alu_src_sel  = 1'b1;   
-                id_alu_op_sel   = 3'b000; // Pass-B logic in ALU_Control
+                id_alu_op_sel   = 3'b000; 
                 id_rs1_used     = 1'b0;   
                 id_rs2_used     = 1'b0;
             end
-
-            // AUIPC (Add Upper Immediate to PC)
-            7'b0010111: begin
+            7'b0010111: begin // AUIPC
                 id_reg_write_en = 1'b1;
                 id_alu_src_sel  = 1'b1;   
-                id_alu_op_sel   = 3'b000; // Use ADD in ALU_Control
-                id_auipc_en     = 1'b1;   // Signals Execute stage to use PC as Operand A
-                id_rs1_used     = 1'b0;   
-                id_rs2_used     = 1'b0;
+                id_alu_op_sel   = 3'b000; 
+                id_auipc_en     = 1'b1;   
             end
-
-            // SYSTEM instructions (CSR Access)
-            7'b1110011: begin
-                id_reg_write_en   = 1'b1;   
-                id_alu_op_sel     = 3'b000; 
-                id_csr_en         = 1'b1;   // Enable CSR path
-                id_rs1_used       = 1'b1;
+            7'b1110011: begin // SYSTEM instructions (CSR Access and MRET)
+                if (id_funct3 == 3'b000) begin
+                    // It is an MRET instruction! 
+                    // No registers are written, it just triggers a jump in EX stage.
+                end else begin
+                    // It is a CSR instruction (csrr, csrw)
+                    id_reg_write_en   = 1'b1;   
+                    id_alu_op_sel     = 3'b000; 
+                    id_csr_en         = 1'b1;   
+                    id_rs1_used       = 1'b1;
+                end
             end
-            
             default: ;
         endcase
     end

@@ -1,13 +1,5 @@
 `timescale 1ns / 1ps
 
-// System Bus — address decoder for the SoC data bus.
-// Routes CPU read/write to the correct peripheral based on address.
-// Peripheral selects are asserted on address match alone (not gated on re/we).
-//
-// Bug fix note: the original code gated uart_sel/gpio_sel/ram_sel on (we || re).
-// During a load-use bubble the hazard unit zeroes re for one cycle, so uart_sel
-// would drop and the UART wrapper would return 0 instead of the real status.
-// Fix: assert sel purely on address decode; each peripheral gates its own output.
 module system_bus (
     input  logic [31:0] addr,
     input  logic [31:0] wdata,
@@ -24,36 +16,47 @@ module system_bus (
     input  logic [31:0] gpio_rdata,
     output logic        uart_sel,
     output logic        uart_we,
-    input  logic [31:0] uart_rdata
+    input  logic [31:0] uart_rdata,
+    // --- NEW: PIC Interface ---
+    output logic        pic_sel,
+    output logic        pic_we,
+    input  logic [31:0] pic_rdata
 );
 
     always_comb begin
         rom_sel  = 1'b0; ram_sel  = 1'b0; ram_we   = 1'b0;
         gpio_sel = 1'b0; gpio_we  = 1'b0; uart_sel = 1'b0;
-        uart_we  = 1'b0; rdata    = 32'b0;
+        uart_we  = 1'b0; pic_sel  = 1'b0; pic_we   = 1'b0;
+        rdata    = 32'b0;
 
         // ROM Decoding
         if (addr >= 32'h0000_0000 && addr <= 32'h0000_0FFF) begin
             rom_sel = 1'b1;
             rdata   = rom_rdata;
         end
-        // GPIO Decoding — sel asserted on address match, not gated on re/we
+        // GPIO Decoding 
         else if (addr == 32'h0000_1000) begin
-            gpio_sel = 1'b1;   // FIX: was (we || re)
+            gpio_sel = 1'b1;   
             gpio_we  = we;
             rdata    = gpio_rdata;
         end
-        // RAM Decoding — sel asserted on address match, not gated on re/we
+        // RAM Decoding 
         else if (addr >= 32'h0000_2000 && addr <= 32'h0000_2FFF) begin
-            ram_sel = 1'b1;    // FIX: was (we || re)
+            ram_sel = 1'b1;    
             ram_we  = we;
             rdata   = ram_rdata;
         end
-        // UART Decoding — sel asserted on address match, not gated on re/we
+        // UART Decoding 
         else if (addr >= 32'h0000_3000 && addr <= 32'h0000_300F) begin
-            uart_sel = 1'b1;   // FIX: was (we || re)
+            uart_sel = 1'b1;   
             uart_we  = we;
             rdata    = uart_rdata ;
+        end
+        // PIC Decoding  <-- NEW
+        else if (addr >= 32'h0000_4000 && addr <= 32'h0000_400F) begin
+            pic_sel = 1'b1;
+            pic_we  = we;
+            rdata   = pic_rdata;
         end
     end
 

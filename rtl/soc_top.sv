@@ -1,12 +1,12 @@
 `timescale 1ns / 1ps
 
 // SoC Top Level
-// Connects the RISC-V core, ROM, RAM, GPIO, UART, and the system bus.
 // Memory map:
-//   0x0000–0x0FFF  ROM  (instructions)
+//   0x0000–0x0FFF  ROM 
 //   0x1000         GPIO
-//   0x2000–0x2FFF  RAM  (data)
-//   0x3000–0x300F  UART (TX data: 0x3000 write, RX data: 0x3000 read, status: 0x3004)
+//   0x2000–0x2FFF  RAM 
+//   0x3000–0x300F  UART 
+//   0x4000-0x400F  PIC  <-- NEW
 module soc_top (
     input  logic         clk,           
     input  logic         rst_n,          
@@ -19,24 +19,44 @@ module soc_top (
     logic [31:0] instr_addr, instr_data;
     logic [31:0] data_addr, data_wdata, data_rdata;
     logic        data_we;
-    logic        data_re; // Read Enable from the CPU (high when a load is in MEM)
+    logic        data_re; 
 
     // --- Peripheral Selection Signals ---
-    logic ram_sel, ram_we, gpio_sel, gpio_we, uart_sel, uart_we;
-    logic [31:0] ram_rdata, gpio_rdata, uart_rdata;
+    logic ram_sel, ram_we, gpio_sel, gpio_we, uart_sel, uart_we, pic_sel, pic_we;
+    logic [31:0] ram_rdata, gpio_rdata, uart_rdata, pic_rdata;
+
+    // --- Interrupt Wires ---
+    logic uart_irq;
+    logic ext_intr;
 
     // --- 1. RISC-V Core ---
     riscv_core u_core (
         .clk              (clk),
         .rst_n            (rst_n),
+        .ext_intr         (ext_intr),
         .instr_mem_addr   (instr_addr),
         .instr_mem_data   (instr_data),
         .instr_mem_ready  (1'b1),
         .data_mem_addr    (data_addr),
         .data_mem_wr_data (data_wdata),
         .data_mem_wr_en   (data_we),
-        .data_mem_rd_en   (data_re),   // Exposed to bus so peripherals know it's a read
+        .data_mem_rd_en   (data_re),   
         .data_mem_rd_data (data_rdata)
+    );
+
+    // --- 1.5 Programmable Interrupt Controller (PIC) ---
+    pic u_pic (
+        .clk         (clk),
+        .rst_n       (rst_n),
+        .sel         (pic_sel),
+        .we          (pic_we),
+        .addr        (data_addr),
+        .wdata       (data_wdata),
+        .rdata       (pic_rdata),
+        .irq_uart_rx (uart_irq),         // <-- From UART rx_valid
+        .irq_uart_tx (1'b0),             // Tied to 0 for now
+        .irq_timer   (1'b0),             // Tied to 0 for now
+        .ext_intr    (ext_intr)          // To CPU
     );
 
     // --- 2. ROM Model ---
@@ -46,26 +66,9 @@ module soc_top (
         .rd_data (instr_data)
     );
 
-    
     logic [31:0] uart_rdata_raw;
     logic [31:0] uart_rdata_sync;
 
-    // uart_rdata_sync breaks the combinatorial path from uart_rdata_raw back
-    // into the CPU's forwarding / hazard logic, preventing a delta-cycle loop.
-    //
-    // Timing analysis (2-cycle UART stall: wait_q=0 then wait_q=1):
-    //
-    //   Stall cycle 1 (wait_q=0): uart_rdata_sync holds the value from the
-    //     PREVIOUS clock edge — may be stale "ghost" data when the bus address
-    //     just changed, but the processor does NOT latch data this cycle.
-    //
-    //   Stall cycle 2 (wait_q=1): uart_rdata_sync captures the new
-    //     uart_rdata_raw (correct for the current address) at the clock edge
-    //     between cycles 1 and 2.  This is the value the processor latches.
-    //
-    // Ghost data in stall cycle 1 is therefore harmless; there is no need to
-    // add extra address-comparison logic (which would push the valid data out
-    // to a third cycle and break rx_valid detection).
     always_ff @(posedge clk or negedge rst_n) begin
         if (!rst_n)
             uart_rdata_sync <= 32'b0;
@@ -73,7 +76,6 @@ module soc_top (
             uart_rdata_sync <= (data_re && uart_sel) ? uart_rdata_raw : 32'b0;
     end
     
-
     // --- 3. System Bus ---
     system_bus u_data_bus (
         .addr       (data_addr), 
@@ -91,7 +93,10 @@ module soc_top (
         .gpio_rdata (gpio_rdata),
         .uart_sel   (uart_sel), 
         .uart_we    (uart_we), 
-        .uart_rdata (uart_rdata_sync) // uart_rdata_sync
+        .uart_rdata (uart_rdata_sync),
+        .pic_sel    (pic_sel),     // <-- CONNECTED TO PIC
+        .pic_we     (pic_we),      // <-- CONNECTED TO PIC
+        .pic_rdata  (pic_rdata)    // <-- CONNECTED TO PIC
     );
 
     // --- 4. Data Memory (RAM) ---
@@ -123,12 +128,13 @@ module soc_top (
         .rst_n    (rst_n),
         .sel      (uart_sel), 
         .we       (uart_we),
-        .re       (data_re), // Passed so wrapper can detect reads vs writes
+        .re       (data_re), 
         .addr     (data_addr), 
         .wdata    (data_wdata),
         .rdata    (uart_rdata_raw),
         .uart_txd (soc_uart_tx),
-        .uart_rxd (soc_uart_rx)
+        .uart_rxd (soc_uart_rx), 
+        .uart_irq (uart_irq)  
     );
 
 endmodule

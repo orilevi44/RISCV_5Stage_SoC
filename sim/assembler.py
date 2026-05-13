@@ -171,6 +171,27 @@ def handle_pseudo(inst, parts, pc, labels):
         return i_type(['xori', parts[1], parts[2], '-1'], '0010011', '100')
     if inst == 'neg':
         return r_type(['sub', parts[1], 'zero', parts[2]], '0110011', '000', '0100000')
+
+    # --- CSR & INTERRUPT INSTRUCTIONS ---
+    
+    # mret (Machine Return)
+    if inst == 'mret':
+        return fmt('00110000001000000000000001110011')
+        
+    # csrw (CSR Write): Translates to csrrw x0, csr, rs
+    if inst == 'csrw':
+        csr_addr = format(int(parts[1], 0), '012b')
+        rs1      = parse_reg(parts[2])
+        rd       = parse_reg('zero')
+        return fmt(csr_addr + rs1 + '001' + rd + '1110011')
+        
+    # csrr (CSR Read): Translates to csrrs rd, csr, x0
+    if inst == 'csrr':
+        rd       = parse_reg(parts[1])
+        csr_addr = format(int(parts[2], 0), '012b')
+        rs1      = parse_reg('zero')
+        return fmt(csr_addr + rs1 + '010' + rd + '1110011')
+
     return None
 
 # ── main ──────────────────────────────────────────────────────────────────────

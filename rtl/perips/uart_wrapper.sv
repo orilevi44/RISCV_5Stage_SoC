@@ -18,7 +18,8 @@ module uart_wrapper #(
     input  logic [31:0]  wdata,     
     output logic [31:0]  rdata,     
     output logic         uart_txd,  
-    input  logic         uart_rxd   
+    input  logic         uart_rxd,
+    output logic         uart_irq   
 );
 
     // --- Internal Registers & Signals ---
@@ -33,6 +34,9 @@ module uart_wrapper #(
 
     assign addr_offset = addr[3:0];
     assign reading_rx_data = sel && re && !we && (addr_offset == 4'h0);
+    
+    // The interrupt line stays HIGH as long as there is unread data
+    assign uart_irq = rx_valid_sticky;
 
     // --- PHY Units Instantiation ---
     uart_tx #(.CLK_FREQ(CLK_FREQ), .BAUD_RATE(BAUD_RATE)) u_tx_phy (
