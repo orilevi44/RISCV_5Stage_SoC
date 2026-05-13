@@ -3,14 +3,13 @@
 :: run_test.bat  <test_name>
 ::
 :: Usage:
-::   run_test.bat echo          → compiles tb/echo_test_tb.sv, loads sim/hex/echo.hex
-::   run_test.bat alu_add       → compiles tb/alu_add_tb.sv,   loads sim/hex/alu_add.hex
-::   run_test.bat branch        → compiles tb/branch_tb.sv,    loads sim/hex/branch.hex
+::   run_test.bat echo
 ::
 :: Convention:
 ::   Testbench : tb/<test_name>_tb.sv
 ::   Firmware  : sim/hex/<test_name>.hex
-::   Binary    : sim/<test_name>_sim  (deleted after run)
+::   Binary    : sim/bin/<test_name>_sim  (deleted after run)
+::   Waves     : sim/waves/waves.fst
 :: =============================================================================
 
 setlocal
@@ -28,7 +27,8 @@ if "%~1"=="" (
 set TEST=%~1
 set TB=tb/%TEST%_tb.sv
 set HEX=sim/hex/%TEST%.hex
-set BIN=sim/%TEST%_sim
+set BIN=sim/bin/%TEST%_sim
+set WAVES=sim/waves/waves.fst
 
 echo.
 echo ===========================================
@@ -36,24 +36,27 @@ echo   RISC-V SoC  --  Test: %TEST%
 echo ===========================================
 
 :: --- Check that testbench exists ---
-if not exist %TB% (
+if not exist "%TB%" (
     echo [ERROR] Testbench not found: %TB%
     pause
     exit /b 1
 )
 
 :: --- Check that hex file exists ---
-if not exist %HEX% (
+if not exist "%HEX%" (
     echo [ERROR] Hex file not found: %HEX%
     pause
     exit /b 1
 )
 
-:: --- Clean old outputs ---
-if not exist sim     mkdir sim
+:: --- Create directories if they don't exist ---
 if not exist sim\hex mkdir sim\hex
-if exist sim\waves.fst  del /q sim\waves.fst
-if exist %BIN%          del /q %BIN%
+if not exist sim\bin mkdir sim\bin
+if not exist sim\waves mkdir sim\waves
+
+:: --- Clean old outputs ---
+if exist "%WAVES%"  del /q "%WAVES%"
+if exist "%BIN%"    del /q "%BIN%"
 
 :: --- Compile ---
 echo Compiling...
@@ -76,6 +79,7 @@ echo Running...
 vvp %BIN% -fst +HEX_FILE=%HEX%
 
 :: --- Cleanup binary ---
+:: If you want to keep the compiled files, put a "::" before the next line
 if exist "%BIN%" del /q "%BIN%"
 
 echo.
