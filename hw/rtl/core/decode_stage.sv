@@ -112,14 +112,14 @@ module decode_stage (
                 id_alu_op_sel     = 3'b000; 
                 id_rs1_used       = 1'b1;
             end
-            7'b0100011: begin // Stores
+            7'b0100011: begin // Stores S-type format
                 id_mem_write_en = 1'b1;
                 id_alu_src_sel  = 1'b1;
                 id_alu_op_sel   = 3'b000; 
                 id_rs1_used     = 1'b1;
                 id_rs2_used     = 1'b1; 
             end
-            7'b1100011: begin // Branches
+            7'b1100011: begin // Branches B-type format
                 id_branch_en   = 1'b1;
                 id_alu_op_sel  = 3'b001; 
                 id_rs1_used    = 1'b1;

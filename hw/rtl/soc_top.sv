@@ -30,6 +30,7 @@ module soc_top (
     logic ext_intr;
 
     // --- 1. RISC-V Core ---
+    (* dont_touch = "true" *)
     riscv_core u_core (
         .clk              (clk),
         .rst_n            (rst_n),
@@ -45,6 +46,7 @@ module soc_top (
     );
 
     // --- 1.5 Programmable Interrupt Controller (PIC) ---
+    (* dont_touch = "true" *)
     pic u_pic (
         .clk         (clk),
         .rst_n       (rst_n),
@@ -60,6 +62,7 @@ module soc_top (
     );
 
     // --- 2. ROM Model ---
+    (* dont_touch = "true" *)
     rom_model u_rom (
         .en      (1'b1),
         .addr    (instr_addr),
@@ -77,6 +80,7 @@ module soc_top (
     end
     
     // --- 3. System Bus ---
+    (* dont_touch = "true" *)
     system_bus u_data_bus (
         .addr       (data_addr), 
         .wdata      (data_wdata), 
@@ -100,6 +104,7 @@ module soc_top (
     );
 
     // --- 4. Data Memory (RAM) ---
+    (* dont_touch = "true" *)
     ram_model u_ram (
         .clk     (clk), 
         .addr    (data_addr), 
@@ -109,6 +114,7 @@ module soc_top (
     );
 
     // --- 5. GPIO Peripheral ---
+    (* dont_touch = "true" *)
     gpio u_gpio (
         .clk       (clk), 
         .rst_n     (rst_n), 
@@ -120,6 +126,7 @@ module soc_top (
     );
     
     // --- 6. UART Peripheral ---
+    (* dont_touch = "true" *)
     uart_wrapper #(
         .CLK_FREQ  (100_000_000), 
         .BAUD_RATE (12_500_000)

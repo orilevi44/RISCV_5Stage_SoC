@@ -1,20 +1,35 @@
-# --- Simulation Binaries & Outputs ---
+# ==========================================
+# RISC-V SoC Project - Gitignore
+# ==========================================
+
+# --- Vivado Hardware Auto-Generated Files ---
+hw/vivado/**/*.cache/
+hw/vivado/**/*.runs/
+hw/vivado/**/*.sim/
+hw/vivado/**/*.hw/
+hw/vivado/**/*.ip_user_files/
+*.jou
+*.log
+*.pb
+*.wdb
+*.dcp
+*.vds
+*.vdi
+
+# --- Software & XSim Auto-Generated Files ---
+sw/xsim/
+
+# --- Simulation Binaries & Outputs (Icarus/General) ---
 soc_sim
 *.vvp
 *.vcd
 *.fst
 *.hier
 a.out
-*.log
 
 # --- Specific Build Files ---
-sim/waves.fst
-sim/program.hex
-
-# --- Instruction/Data Memory Files ---
-# (Ignore if you want to keep your simulations private/local)
-# *.hex
-# *.mem
+hw/sim/waves.fst
+hw/sim/program.hex
 
 # --- Compilation & Tool Artifacts ---
 ivlflags

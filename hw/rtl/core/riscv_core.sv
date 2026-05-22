@@ -260,4 +260,14 @@ module riscv_core (
     logic global_stall;
     assign global_stall = uart_stall;
 
+
+    // ==========================================
+    // DEBUG MONITOR FOR THE WHILE LOOP
+    // ==========================================
+    always_ff @(posedge clk) begin
+        if (rst_n && if_pc >= 32'h00000030 && if_pc <= 32'h000000A0 && $time < 10000000) begin
+            $display("[DEBUG] Time: %0t | PC: %h | Instr: %h | ALU_Out: %h", $time, if_pc, if_inst, ex_alu_res);
+        end
+    end
+
 endmodule

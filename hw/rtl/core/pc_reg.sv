@@ -3,7 +3,7 @@
 /**
  * Program Counter Register
  * ------------------------
- * Holds the address of the instruction to be fetched.
+ */tb_soc_top/uut/u_core/u_fetch_unit/pc_inst Holds the address of the instruction to be fetched.
  * Supports active-low reset and stall (via 'en' signal).
  */
 module pc_reg (

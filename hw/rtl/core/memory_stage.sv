@@ -31,8 +31,12 @@ module memory_stage (
         mem_branch_taken = 1'b0;
         if (mem_branch_en) begin
             case (mem_funct3)
-                3'b000:  mem_branch_taken = mem_alu_zero;  // BEQ
-                3'b001:  mem_branch_taken = !mem_alu_zero; // BNE
+                3'b000:  mem_branch_taken = mem_alu_zero;  // BEQ  (ALU does SUB, zero if a==b)
+                3'b001:  mem_branch_taken = !mem_alu_zero; // BNE  (ALU does SUB, not zero if a!=b)
+                3'b100:  mem_branch_taken = !mem_alu_zero; // BLT  (ALU does SLT, result 1 if a<b)
+                3'b101:  mem_branch_taken = mem_alu_zero;  // BGE  (ALU does SLT, result 0 if a>=b)
+                3'b110:  mem_branch_taken = !mem_alu_zero; // BLTU (ALU does SLTU, result 1 if a<b)
+                3'b111:  mem_branch_taken = mem_alu_zero;  // BGEU (ALU does SLTU, result 0 if a>=b)
                 default: mem_branch_taken = 1'b0;
             endcase
         end

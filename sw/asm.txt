@@ -1,0 +1,51 @@
+
+firmware.elf:     file format elf32-littleriscv
+
+
+Disassembly of section .text:
+
+00000000 <_start>:
+   0:	00003137          	lui	sp,0x3
+   4:	008000ef          	jal	c <main>
+
+00000008 <end_loop>:
+   8:	0000006f          	j	8 <end_loop>
+
+0000000c <main>:
+   c:	fe010113          	addi	sp,sp,-32 # 2fe0 <main+0x2fd4>
+  10:	00112e23          	sw	ra,28(sp)
+  14:	00812c23          	sw	s0,24(sp)
+  18:	02010413          	addi	s0,sp,32
+  1c:	fe042623          	sw	zero,-20(s0)
+  20:	00100793          	li	a5,1
+  24:	fef42423          	sw	a5,-24(s0)
+  28:	000017b7          	lui	a5,0x1
+  2c:	fec42703          	lw	a4,-20(s0)
+  30:	00e7a023          	sw	a4,0(a5) # 1000 <main+0xff4>
+  34:	fec42703          	lw	a4,-20(s0)
+  38:	fe842783          	lw	a5,-24(s0)
+  3c:	00f707b3          	add	a5,a4,a5
+  40:	fef42223          	sw	a5,-28(s0)
+  44:	fe842783          	lw	a5,-24(s0)
+  48:	fef42623          	sw	a5,-20(s0)
+  4c:	fe442783          	lw	a5,-28(s0)
+  50:	fef42423          	sw	a5,-24(s0)
+  54:	000017b7          	lui	a5,0x1
+  58:	fec42703          	lw	a4,-20(s0)
+  5c:	00e7a023          	sw	a4,0(a5) # 1000 <main+0xff4>
+  60:	fec42703          	lw	a4,-20(s0)
+  64:	0000a7b7          	lui	a5,0xa
+  68:	c4078793          	addi	a5,a5,-960 # 9c40 <main+0x9c34>
+  6c:	00e7d863          	bge	a5,a4,7c <main+0x70>
+  70:	fe042623          	sw	zero,-20(s0)
+  74:	00100793          	li	a5,1
+  78:	fef42423          	sw	a5,-24(s0)
+  7c:	fe042023          	sw	zero,-32(s0)
+  80:	0100006f          	j	90 <main+0x84>
+  84:	fe042783          	lw	a5,-32(s0)
+  88:	00178793          	addi	a5,a5,1
+  8c:	fef42023          	sw	a5,-32(s0)
+  90:	fe042703          	lw	a4,-32(s0)
+  94:	00400793          	li	a5,4
+  98:	fee7d6e3          	bge	a5,a4,84 <main+0x78>
+  9c:	f99ff06f          	j	34 <main+0x28>
