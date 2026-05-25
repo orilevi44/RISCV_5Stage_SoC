@@ -16,8 +16,11 @@ hw/vivado/**/*.ip_user_files/
 *.vds
 *.vdi
 
-# --- Software & XSim Auto-Generated Files ---
+# --- Software & Firmware Auto-Generated Files ---
 sw/xsim/
+sw/*.elf
+sw/*.mem
+sw/*.txt
 
 # --- Simulation Binaries & Outputs (Icarus/General) ---
 soc_sim
