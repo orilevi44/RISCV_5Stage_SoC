@@ -18,7 +18,7 @@ module rom_model (
         
         // 2. עכשיו נטען את קובץ התוכנה. 
         // פקודה זו תדרוס רק את הכתובות הראשונות שיש בקובץ, ותשאיר NOP בשאר!
-        $readmemh("firmware.mem", mem);
+        $readmemh("C:/My_Projects/RISCV_SoC_Project/sw/firmware.mem", mem);
     end
 
     // קריאה קומבינטורית: addr[11:2] משמיט את 2 הביטים התחתונים (Byte Alignment)

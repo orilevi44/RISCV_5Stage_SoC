@@ -17,6 +17,7 @@ module riscv_core (
     output logic [31:0] data_mem_wr_data,
     output logic        data_mem_wr_en,
     output logic        data_mem_rd_en, 
+    output logic [3:0] data_mem_byte_en,
     input  logic [31:0] data_mem_rd_data
 );
 
@@ -94,9 +95,11 @@ module riscv_core (
 
     assign actual_jump = (mem_branch_taken || mem_jal_en || mem_jalr_en);
 
+    logic [31:0] formatted_wr_data;
+
     // Bus Interface
     assign data_mem_addr     = mem_alu_res;
-    assign data_mem_wr_data  = mem_wr_data;
+    assign data_mem_wr_data  = formatted_wr_data;
     assign data_mem_rd_en    = mem_mem_read_en;
     assign data_mem_wr_en    = mem_mem_write_en;
 
@@ -182,6 +185,10 @@ module riscv_core (
         .mem_mem_read_en(mem_mem_read_en), .mem_mem_write_en(mem_mem_write_en),
         .mem_branch_en(mem_branch_en), .mem_funct3(mem_funct3), .mem_alu_zero(mem_alu_zero),
         .ram_rd_data(data_mem_rd_data),
+        
+        .byte_en(data_mem_byte_en),
+        .mem_formatted_write_data(formatted_wr_data), // <-- Connect the new port here!
+        
         .mem_read_data(mem_rd_data), .mem_branch_target_out(final_branch_addr),
         .mem_branch_taken(mem_branch_taken)
     );

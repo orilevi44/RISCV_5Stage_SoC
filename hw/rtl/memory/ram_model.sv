@@ -8,7 +8,9 @@ module ram_model (
     input  logic [31:0] addr,
     input  logic        wr_en,
     input  logic [31:0] wr_data,
+    input  logic  [3:0] byte_en,
     output logic [31:0] rd_data
+
 );
 
     logic [31:0] mem [0:1023]; // 4KB RAM
@@ -16,7 +18,10 @@ module ram_model (
     // Synchronous Write
     always_ff @(posedge clk) begin
         if (wr_en) begin
-            mem[addr[11:2]] <= wr_data;
+            if (byte_en[0]) mem[addr[11:2]][7:0]   <= wr_data[7:0];
+            if (byte_en[1]) mem[addr[11:2]][15:8]  <= wr_data[15:8];
+            if (byte_en[2]) mem[addr[11:2]][23:16] <= wr_data[23:16];
+            if (byte_en[3]) mem[addr[11:2]][31:24] <= wr_data[31:24];
         end
     end
 

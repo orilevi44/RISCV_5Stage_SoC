@@ -20,6 +20,10 @@ module soc_top (
     logic [31:0] data_addr, data_wdata, data_rdata;
     logic        data_we;
     logic        data_re; 
+    logic [3:0]  data_byte_en;
+    logic [3:0]  ram_byte_en;
+
+
 
     // --- Peripheral Selection Signals ---
     logic ram_sel, ram_we, gpio_sel, gpio_we, uart_sel, uart_we, pic_sel, pic_we;
@@ -42,6 +46,7 @@ module soc_top (
         .data_mem_wr_data (data_wdata),
         .data_mem_wr_en   (data_we),
         .data_mem_rd_en   (data_re),   
+        .data_mem_byte_en (data_byte_en),
         .data_mem_rd_data (data_rdata)
     );
 
@@ -98,6 +103,8 @@ module soc_top (
         .uart_sel   (uart_sel), 
         .uart_we    (uart_we), 
         .uart_rdata (uart_rdata_sync),
+        .data_byte_en (data_byte_en), // <-- NEW: Byte Enable for RAM Writes
+        .ram_byte_en (ram_byte_en),   // <-- NEW: Byte Enable Output to RAM
         .pic_sel    (pic_sel),     // <-- CONNECTED TO PIC
         .pic_we     (pic_we),      // <-- CONNECTED TO PIC
         .pic_rdata  (pic_rdata)    // <-- CONNECTED TO PIC
@@ -109,7 +116,8 @@ module soc_top (
         .clk     (clk), 
         .addr    (data_addr), 
         .wr_en   (ram_we),
-        .wr_data (data_wdata), 
+        .wr_data (data_wdata),
+        .byte_en (ram_byte_en), // <-- NEW: Byte Enable from System Bus 
         .rd_data (ram_rdata)
     );
 

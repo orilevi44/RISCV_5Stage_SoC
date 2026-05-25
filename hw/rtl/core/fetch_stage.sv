@@ -1,50 +1,71 @@
 `timescale 1ns / 1ps
 
-// Fetch Stage
-// Reads the next instruction from ROM using the Program Counter (PC).
-// Handles jumps (redirect PC) and stalls (freeze PC).
+/**
+ * Fetch Stage (IF)
+ * -------------------------------------------------------------------------
+ * This module is responsible for retrieving the next instruction from the 
+ * Instruction Memory (or Cache). It maintains the Program Counter (PC) and 
+ * calculates the next PC based on sequential execution, stalls, or jumps.
+ */
 module fetch_stage (
-    input  logic         clk,
-    input  logic         rst_n,
-    input  logic         en,             // Stall signal (1 = Go, 0 = Wait)
-    input  logic         jump_sel,       // High if Branch/Jump is taken
-    input  logic [31:0]  jump_addr,      // Target address
+    // Global Clock and Reset
+    input  logic        clk,
+    input  logic        rst_n,           // Active-low asynchronous reset
 
-    // Instruction Memory Interface
-    output logic [31:0]  icache_addr,    
-    input  logic [31:0]  icache_instr,   
-    input  logic         icache_ready,   
+    // Control Signals (from Hazard Unit / Pipeline Control)
+    input  logic        en,              // Pipeline enable signal (1 = Go, 0 = Stall)
+    input  logic        jump_sel,        // Branch/Jump flag (1 = Branch Taken)
+    input  logic [31:0] jump_addr,       // Target address for a taken branch/jump
 
-    // Pipeline Stage Outputs
-    output logic [31:0]  if_pc,          
-    output logic [31:0]  if_instr,       
-    output logic         if_stall        
+    // Instruction Memory (ICache) Interface
+    output logic [31:0] icache_addr,     // Address requested from Instruction Memory
+    input  logic [31:0] icache_instr,    // Fetched instruction data
+    input  logic        icache_ready,    // Memory readiness flag (1 = Data valid)
+
+    // Pipeline Stage Outputs (to IF/ID Register)
+    output logic [31:0] if_pc,           // Current PC value passed down the pipeline
+    output logic [31:0] if_instr,        // Fetched instruction passed down the pipeline
+    output logic        if_stall         // Output flag indicating a fetch stall
 );
 
+    // Internal wires for PC state
     logic [31:0] current_pc;
     logic [31:0] next_pc;
 
-    // 1. Next PC Logic (The Multiplexer)
+    // ==============================================================================
+    // 1. Next PC Calculation Logic (Multiplexer)
+    // ==============================================================================
+    // Determines the target address for the next clock cycle.
     always_comb begin
-
-
         if (jump_sel) begin
+            // Highest Priority: Control Hazard. A jump or branch was taken.
             next_pc = jump_addr;
         end else if (en) begin
+            // Normal Execution: Advance PC by 4 bytes (32-bit instruction word).
             next_pc = current_pc + 32'd4;
         end else begin
-            next_pc = current_pc; // Stall: keep PC unchanged
+            // Pipeline Stall: Maintain the current PC to re-fetch the same instruction.
+            next_pc = current_pc;
         end
     end
 
+    // ==============================================================================
     // 2. Control Logic
-    // Critical: on a jump, always allow PC update even if the pipeline is stalled
+    // ==============================================================================
     logic pc_update_en;
-    assign pc_update_en = (icache_ready&& en ) || jump_sel; 
     
+    // The PC register is allowed to update if:
+    // a) The Instruction Memory is ready AND the pipeline is not stalled.
+    // b) A jump is taken (Overrides stalls to immediately redirect control flow).
+    assign pc_update_en = (icache_ready && en) || jump_sel; 
+    
+    // Assert stall upwards if the memory is not ready to provide the instruction.
     assign if_stall     = !icache_ready;
 
-    // 3. PC Register
+    // ==============================================================================
+    // 3. Program Counter Register Instance
+    // ==============================================================================
+    // Sequential element that holds the 32-bit PC value.
     pc_reg pc_inst (
         .clk     (clk),
         .rst_n   (rst_n),
@@ -53,9 +74,11 @@ module fetch_stage (
         .pc_out  (current_pc)
     );
 
-    // Outputs
-    assign icache_addr = current_pc;  
-    assign if_pc       = current_pc; 
-    assign if_instr    = icache_instr; 
+    // ==============================================================================
+    // 4. Output Assignments
+    // ==============================================================================
+    assign icache_addr = current_pc;     // Drive memory address with current PC
+    assign if_pc       = current_pc;     // Pass PC down the pipeline for address calculations
+    assign if_instr    = icache_instr;   // Pass raw instruction word down the pipeline
 
 endmodule
