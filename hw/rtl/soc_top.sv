@@ -39,9 +39,13 @@ module soc_top (
         .clk              (clk),
         .rst_n            (rst_n),
         .ext_intr         (ext_intr),
-        .instr_mem_addr   (instr_addr),
-        .instr_mem_data   (instr_data),
-        .instr_mem_ready  (1'b1),
+        
+        // ROM Interface (Updated!)
+        .rom_addr         (instr_addr), 
+        .rom_data         (instr_data),
+        .rom_read_en      (), // ה-ROM שלך תמיד עובד כרגע, אז אפשר להשאיר ריק
+        
+        // Data Memory Interface
         .data_mem_addr    (data_addr),
         .data_mem_wr_data (data_wdata),
         .data_mem_wr_en   (data_we),
@@ -69,8 +73,8 @@ module soc_top (
     // --- 2. ROM Model ---
     (* dont_touch = "true" *)
     rom_model u_rom (
-        .en      (1'b1),
         .addr    (instr_addr),
+        .en      (1'b1),
         .rd_data (instr_data)
     );
 

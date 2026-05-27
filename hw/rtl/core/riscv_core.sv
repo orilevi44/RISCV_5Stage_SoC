@@ -5,12 +5,22 @@ module riscv_core (
     input  logic        clk,
     input  logic        rst_n,
     
-    input  logic        ext_intr, // NEW: External Interrupt from PIC
+    input  logic        ext_intr, 
     
     // Instruction Memory Interface
-    output logic [31:0] instr_mem_addr,
     input  logic [31:0] instr_mem_data,
     input  logic        instr_mem_ready,
+    output logic [31:0] instr_mem_addr,
+
+    // input  logic [31:0] rom_data;
+    // output logic [31:0] rom_pc, 
+    // output logic        rom_read_en; 
+
+    // ROM Interface (Driven by internal I-Cache to the SoC)
+    output logic [31:0] rom_addr,
+    input  logic [31:0] rom_data,
+    output logic        rom_read_en,
+    
 
     // Data Memory Interface
     output logic [31:0] data_mem_addr,
@@ -103,11 +113,35 @@ module riscv_core (
     assign data_mem_rd_en    = mem_mem_read_en;
     assign data_mem_wr_en    = mem_mem_write_en;
 
-    // [FETCH]
+    // --- Internal I-Cache Wires ---
+    logic [31:0] internal_icache_inst; // החוט הפנימי שמעביר את הפקודה
+    logic        icache_stall;         // חוט העצירה שמחובר ל-Hazard Unit
+
+    // [ICACHE INSTANCE]
+    icache u_icache (
+        .clk         (clk),
+        .rst_n       (rst_n),
+        
+        // צד המעבד: מחובר ישירות ל-Fetch
+        .cpu_pc      (if_pc),               // input 
+        .cpu_inst    (internal_icache_inst), //output
+        .cpu_stall   (icache_stall), // output
+        
+        // צד הזיכרון: יוצא החוצה מהליבה
+        .rom_data    (rom_data),
+        .rom_pc      (rom_addr),
+        .rom_read_en (rom_read_en)
+     );
+
+    // [FETCH STAGE]
     fetch_stage u_fetch_unit (
         .clk(clk), .rst_n(rst_n), .en(if_pc_en && !global_stall),
-        .jump_sel(final_jump_sel), .jump_addr(final_jump_addr), // Updated!
-        .icache_addr(instr_mem_addr), .icache_instr(instr_mem_data), .icache_ready(instr_mem_ready),
+        .jump_sel(final_jump_sel), .jump_addr(final_jump_addr), 
+        
+        .icache_addr(),                      // נשאר ריק!
+        .icache_instr(internal_icache_inst), // מתחבר לחוט הפנימי של ה-Cache
+        .icache_ready(1'b1),                 // קבוע ל-1, ה-Hazard מנהל עצירות
+        
         .if_pc(if_pc), .if_instr(if_inst), .if_stall(if_stall)
     );
 
@@ -222,6 +256,7 @@ module riscv_core (
         .ex_rd_addr        (ex_rd_addr),
         .ex_mem_read_en    (ex_mem_read_en),
         .jump_branch_taken (actual_jump),
+        .icache_stall      (icache_stall),
         .mem_mem_read_en   (mem_mem_read_en),
         .mem_alu_result    (mem_alu_res),
         .uart_already_waited (uart_wait_cycle_q),
@@ -268,13 +303,5 @@ module riscv_core (
     assign global_stall = uart_stall;
 
 
-    // ==========================================
-    // DEBUG MONITOR FOR THE WHILE LOOP
-    // ==========================================
-    always_ff @(posedge clk) begin
-        if (rst_n && if_pc >= 32'h00000030 && if_pc <= 32'h000000A0 && $time < 10000000) begin
-            $display("[DEBUG] Time: %0t | PC: %h | Instr: %h | ALU_Out: %h", $time, if_pc, if_inst, ex_alu_res);
-        end
-    end
 
 endmodule

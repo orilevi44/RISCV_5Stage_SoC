@@ -3,17 +3,11 @@
 // ---------------------------------------------------------------------------
 // Hazard Detection Unit
 //
-// Handles three hazard classes:
+// Handles four hazard classes:
 //   1. Branch/jump flush  — flushes IF/ID, ID/EX, EX/MEM on a taken branch.
-//   2. Load-use stall     — stalls IF+ID and flushes ID/EX when an EX-stage
-//                           load is followed immediately by a dependent inst.
-//   3. UART wait-state    — when lbu/lw reaches MEM stage targeting the UART
-//                           address window (0x3000-0x300F), one extra cycle is
-//                           needed for uart_rdata_sync to settle.  The HDU
-//                           asserts uart_stall for exactly ONE cycle; the
-//                           uart_already_waited input (driven by a FF in
-//                           riscv_core that captures uart_stall) clears it on
-//                           the following cycle.
+//   2. I-Cache Stall      — stalls PC and IF/ID, flushes ID/EX when I-Cache misses.
+//   3. UART wait-state    — stalls the pipeline for UART sync.
+//   4. Load-use stall     — stalls IF+ID and flushes ID/EX for data dependencies.
 // ---------------------------------------------------------------------------
 
 module hazard_detection_unit (
@@ -26,10 +20,13 @@ module hazard_detection_unit (
     // Branch/jump taken
     input  logic        jump_branch_taken,
 
+    // I-Cache Stall Input
+    input  logic        icache_stall,
+
     // UART wait-state inputs
-    input  logic        mem_mem_read_en,    // lbu/lw is in MEM stage
-    input  logic [31:0] mem_alu_result,     // address being presented to bus
-    input  logic        uart_already_waited,// high the cycle AFTER uart_stall fired
+    input  logic        mem_mem_read_en,    
+    input  logic [31:0] mem_alu_result,     
+    input  logic        uart_already_waited,
 
     // Standard pipeline control outputs
     output logic        if_pc_en,
@@ -38,25 +35,24 @@ module hazard_detection_unit (
     output logic        if_id_flush,
     output logic        ex_mem_flush,
 
-    // UART wait-state output — used by riscv_core to freeze/flush pipeline
+    // UART wait-state output
     output logic        uart_stall
 );
 
     // Detect a read whose target address falls in the UART window.
-    // mem_alu_result[31:4] == 0x0000300 covers 0x3000-0x300F.
     logic uart_read_detected;
     assign uart_read_detected = mem_mem_read_en &&
                                 (mem_alu_result[31:4] == 28'h0000_300);
 
-    // Assert for exactly one cycle: high on first detection, cleared once
-    // uart_already_waited (= previous uart_stall) goes high.
+    // Assert for exactly one cycle
     assign uart_stall = uart_read_detected && !uart_already_waited;
 
     // -----------------------------------------------------------------------
     // Priority (highest → lowest):
     //   1. jump_branch_taken — hard flush of fetch/decode/execute
-    //   2. uart_stall        — freeze everything ahead of MEM
-    //   3. load-use          — stall fetch/decode, flush ID/EX bubble
+    //   2. icache_stall      — freeze PC & Decode, inject NOP to Execute
+    //   3. uart_stall        — freeze everything ahead of MEM
+    //   4. load-use          — stall fetch/decode, flush ID/EX bubble
     // -----------------------------------------------------------------------
     always_comb begin
         // Defaults: pipeline flows freely
@@ -72,11 +68,15 @@ module hazard_detection_unit (
             id_ex_flush  = 1'b1;
             ex_mem_flush = 1'b1;
         end
+        else if (icache_stall) begin 
+            // I-Cache Miss: Freeze the PC so we don't skip instructions,
+            // freeze ID so the current instruction isn't overwritten by garbage,
+            // and flush ID/EX so a NOP goes down the pipe.
+            if_pc_en     = 1'b0;
+            id_reg_en    = 1'b0;
+            id_ex_flush  = 1'b1;
+        end
         else if (uart_stall) begin
-            // Freeze the front-end.  riscv_core uses global_stall (= uart_stall)
-            // to also freeze id_ex_reg and ex_mem_reg, and flushes mem_wb_reg
-            // to insert a NOP into WB so the preceding instruction is not
-            // written to the register file a second time on stall release.
             if_pc_en  = 1'b0;
             id_reg_en = 1'b0;
         end
