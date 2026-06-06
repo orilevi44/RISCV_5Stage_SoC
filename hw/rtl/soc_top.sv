@@ -2,28 +2,35 @@
 
 // SoC Top Level
 // Memory map:
-//   0x0000–0x0FFF  ROM 
+//   0x0000–0x0FFF  ROM
 //   0x1000         GPIO
-//   0x2000–0x2FFF  RAM 
-//   0x3000–0x300F  UART 
-//   0x4000-0x400F  PIC  <-- NEW
+//   0x2000–0x2FFF  RAM   ← accessed through D-Cache inside riscv_core
+//   0x3000–0x300F  UART
+//   0x4000–0x400F  PIC
+//
+// D-Cache integration note:
+//   The core no longer exposes raw MEM-stage signals.  Instead it exposes the
+//   D-Cache's RAM bus (dcache_ram_*).  All data-bus traffic — including MMIO —
+//   passes through the D-Cache FSM.  The D-Cache stalls the pipeline on a miss
+//   and presents the refilled data once the line is allocated.
+//   RAM write-back evictions are always full-word (byte_en = 4'b1111).
 module soc_top (
-    input  logic         clk,           
-    input  logic         rst_n,          
-    output logic [31:0]  soc_gpio_out,   
-    output logic         soc_uart_tx,    
-    input  logic         soc_uart_rx     
+    input  logic         clk,
+    input  logic         rst_n,
+    output logic [31:0]  soc_gpio_out,
+    output logic         soc_uart_tx,
+    input  logic         soc_uart_rx
 );
 
-    // --- Internal Bus Wires ---
+    // --- Instruction Bus ---
     logic [31:0] instr_addr, instr_data;
-    logic [31:0] data_addr, data_wdata, data_rdata;
-    logic        data_we;
-    logic        data_re; 
-    logic [3:0]  data_byte_en;
-    logic [3:0]  ram_byte_en;
 
-
+    // --- Data Bus (sourced from D-Cache inside core) ---
+    logic [31:0] data_addr;        // dcache_ram_addr
+    logic [31:0] data_wdata;       // dcache_ram_wr_data
+    logic        data_we;          // dcache_ram_wr_en
+    logic        data_re;          // dcache_ram_rd_en
+    logic [31:0] data_rdata;       // → dcache_ram_data (back into core)
 
     // --- Peripheral Selection Signals ---
     logic ram_sel, ram_we, gpio_sel, gpio_we, uart_sel, uart_we, pic_sel, pic_we;
@@ -33,25 +40,24 @@ module soc_top (
     logic uart_irq;
     logic ext_intr;
 
-    // --- 1. RISC-V Core ---
+    // --- 1. RISC-V Core (D-Cache integrated inside) ---
     (* dont_touch = "true" *)
     riscv_core u_core (
         .clk              (clk),
         .rst_n            (rst_n),
         .ext_intr         (ext_intr),
-        
-        // ROM Interface (Updated!)
-        .rom_addr         (instr_addr), 
+
+        // ROM Interface (I-Cache inside core → ROM)
+        .rom_addr         (instr_addr),
         .rom_data         (instr_data),
-        .rom_read_en      (), // ה-ROM שלך תמיד עובד כרגע, אז אפשר להשאיר ריק
-        
-        // Data Memory Interface
-        .data_mem_addr    (data_addr),
-        .data_mem_wr_data (data_wdata),
-        .data_mem_wr_en   (data_we),
-        .data_mem_rd_en   (data_re),   
-        .data_mem_byte_en (data_byte_en),
-        .data_mem_rd_data (data_rdata)
+        .rom_read_en      (),
+
+        // D-Cache → System Bus Interface
+        .dcache_ram_addr    (data_addr),
+        .dcache_ram_wr_data (data_wdata),
+        .dcache_ram_wr_en   (data_we),
+        .dcache_ram_rd_en   (data_re),
+        .dcache_ram_data    (data_rdata)
     );
 
     // --- 1.5 Programmable Interrupt Controller (PIC) ---
@@ -64,10 +70,10 @@ module soc_top (
         .addr        (data_addr),
         .wdata       (data_wdata),
         .rdata       (pic_rdata),
-        .irq_uart_rx (uart_irq),         // <-- From UART rx_valid
-        .irq_uart_tx (1'b0),             // Tied to 0 for now
-        .irq_timer   (1'b0),             // Tied to 0 for now
-        .ext_intr    (ext_intr)          // To CPU
+        .irq_uart_rx (uart_irq),
+        .irq_uart_tx (1'b0),
+        .irq_timer   (1'b0),
+        .ext_intr    (ext_intr)
     );
 
     // --- 2. ROM Model ---
@@ -78,6 +84,7 @@ module soc_top (
         .rd_data (instr_data)
     );
 
+    // UART read-data synchroniser (one-cycle registered to align with bus)
     logic [31:0] uart_rdata_raw;
     logic [31:0] uart_rdata_sync;
 
@@ -87,73 +94,76 @@ module soc_top (
         else
             uart_rdata_sync <= (data_re && uart_sel) ? uart_rdata_raw : 32'b0;
     end
-    
+
     // --- 3. System Bus ---
+    // D-Cache evictions are always full-word writes, so ram_byte_en = 4'b1111.
     (* dont_touch = "true" *)
     system_bus u_data_bus (
-        .addr       (data_addr), 
-        .wdata      (data_wdata), 
-        .we         (data_we),
-        .re         (data_re),    
-        .rdata      (data_rdata),
-        .rom_sel    (), 
-        .rom_rdata  (32'b0),
-        .ram_sel    (ram_sel),   
-        .ram_we     (ram_we),   
-        .ram_rdata  (ram_rdata),
-        .gpio_sel   (gpio_sel), 
-        .gpio_we    (gpio_we),  
-        .gpio_rdata (gpio_rdata),
-        .uart_sel   (uart_sel), 
-        .uart_we    (uart_we), 
-        .uart_rdata (uart_rdata_sync),
-        .data_byte_en (data_byte_en), // <-- NEW: Byte Enable for RAM Writes
-        .ram_byte_en (ram_byte_en),   // <-- NEW: Byte Enable Output to RAM
-        .pic_sel    (pic_sel),     // <-- CONNECTED TO PIC
-        .pic_we     (pic_we),      // <-- CONNECTED TO PIC
-        .pic_rdata  (pic_rdata)    // <-- CONNECTED TO PIC
+        .addr         (data_addr),
+        .wdata        (data_wdata),
+        .we           (data_we),
+        .re           (data_re),
+        .rdata        (data_rdata),
+        .rom_sel      (),
+        .rom_rdata    (32'b0),
+        .ram_sel      (ram_sel),
+        .ram_we       (ram_we),
+        .ram_rdata    (ram_rdata),
+        .gpio_sel     (gpio_sel),
+        .gpio_we      (gpio_we),
+        .gpio_rdata   (gpio_rdata),
+        .uart_sel     (uart_sel),
+        .uart_we      (uart_we),
+        .uart_rdata   (uart_rdata_sync),
+        // D-Cache write-back evictions are always full 32-bit words
+        .data_byte_en (4'b1111),
+        .ram_byte_en  (),          // driven by system_bus internally; RAM uses it directly
+        .pic_sel      (pic_sel),
+        .pic_we       (pic_we),
+        .pic_rdata    (pic_rdata)
     );
 
     // --- 4. Data Memory (RAM) ---
     (* dont_touch = "true" *)
     ram_model u_ram (
-        .clk     (clk), 
-        .addr    (data_addr), 
+        .clk     (clk),
+        .addr    (data_addr),
         .wr_en   (ram_we),
         .wr_data (data_wdata),
-        .byte_en (ram_byte_en), // <-- NEW: Byte Enable from System Bus 
+        // System bus passes data_byte_en (4'b1111) through as ram_byte_en
+        .byte_en (4'b1111),
         .rd_data (ram_rdata)
     );
 
     // --- 5. GPIO Peripheral ---
     (* dont_touch = "true" *)
     gpio u_gpio (
-        .clk       (clk), 
-        .rst_n     (rst_n), 
-        .sel       (gpio_sel), 
+        .clk       (clk),
+        .rst_n     (rst_n),
+        .sel       (gpio_sel),
         .we        (gpio_we),
-        .wdata     (data_wdata), 
-        .rdata     (gpio_rdata), 
+        .wdata     (data_wdata),
+        .rdata     (gpio_rdata),
         .gpio_pins (soc_gpio_out)
     );
-    
+
     // --- 6. UART Peripheral ---
     (* dont_touch = "true" *)
     uart_wrapper #(
-        .CLK_FREQ  (100_000_000), 
+        .CLK_FREQ  (100_000_000),
         .BAUD_RATE (12_500_000)
     ) u_uart (
-        .clk      (clk), 
+        .clk      (clk),
         .rst_n    (rst_n),
-        .sel      (uart_sel), 
+        .sel      (uart_sel),
         .we       (uart_we),
-        .re       (data_re), 
-        .addr     (data_addr), 
+        .re       (data_re),
+        .addr     (data_addr),
         .wdata    (data_wdata),
         .rdata    (uart_rdata_raw),
         .uart_txd (soc_uart_tx),
-        .uart_rxd (soc_uart_rx), 
-        .uart_irq (uart_irq)  
+        .uart_rxd (soc_uart_rx),
+        .uart_irq (uart_irq)
     );
 
 endmodule
