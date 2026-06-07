@@ -49,3 +49,9 @@ draws/
 *.swp
 .DS_Store
 Thumbs.db
+
+# --- Vivado Project and Configuration Files ---
+*.xpr
+*.wcfg
+*.data
+*.xpr.zip
