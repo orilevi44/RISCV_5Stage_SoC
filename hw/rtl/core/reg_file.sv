@@ -42,7 +42,11 @@ module reg_file (
     // ==============================================================================
     // Write Logic (Synchronous)
     // ==============================================================================
-    always_ff @(posedge clk) begin
+    // NOTE: 'always' is used instead of 'always_ff' because the initial block
+    // above also drives 'registers' for simulation initialisation.  Questa's
+    // strict always_ff rule disallows any second driver on the same variable;
+    // 'always' gives identical simulation and synthesis behaviour here.
+    always @(posedge clk) begin
         // Only write if enabled AND we are not trying to overwrite the zero register
         if (we && (write_reg != 5'b0)) begin
             registers[write_reg] <= write_data;
