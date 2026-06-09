@@ -253,23 +253,38 @@ The project includes **9 targeted testbenches** covering the full design stack, 
 
 ## UVM Verification Environment
 
-The RISC-V SoC is verified using a full **UVM 1.2** testbench running on Siemens Questa 2025.2. The environment provides a self-checking, reusable verification infrastructure with a built-in golden reference model (ISS), backdoor ROM loading, and an in-order scoreboard.
+The RISC-V SoC is verified using a complete **UVM 1.2** testbench targeting Siemens Questa 2025.2. The environment is fully self-checking: a lightweight RV32I instruction set simulator (ISS) runs the same program before the hardware does, produces a golden list of expected register writes, and an in-order scoreboard compares every hardware write against that list automatically.
+
+The testbench lives in `hw/tb/uvm/` and is composed of three source files:
+
+| File | Contents |
+|------|----------|
+| `riscv_if.sv` | SystemVerilog virtual interface — clocking block, DUT probes |
+| `riscv_uvm_pkg.sv` | UVM package — all classes from transaction types to tests |
+| `riscv_uvm_tb.sv` | Top-level HDL module — DUT instantiation, clock, `uvm_config_db` setup |
 
 ---
 
 ### Testbench Architecture
 
 ```
-riscv_uvm_tb  (Top-level HDL module — instantiates DUT + virtual interface)
+riscv_uvm_tb  (top-level HDL module, 100 MHz clock, soc_top DUT)
 │
-│   ┌─────────────────────────────────────────────┐
-│   │  riscv_if  (SystemVerilog Virtual Interface) │
-│   │  • clocking block (monitor_cb)               │
-│   │  • DUT control signals: clk, rst_n           │
-│   │  • Probed signals: we, write_reg, write_data │
-│   └─────────────────────────────────────────────┘
+│   ┌──────────────────────────────────────────────────────┐
+│   │  riscv_if  (virtual interface)                        │
+│   │  ┌─────────────────────────────────────────────────┐ │
+│   │  │  clocking block  monitor_cb  @(posedge clk)     │ │
+│   │  │  default input #1step  ← race-free sampling     │ │
+│   │  │  inputs: rst_n, regfile_we, regfile_waddr [4:0] │ │
+│   │  │                         regfile_wdata  [31:0]   │ │
+│   │  └─────────────────────────────────────────────────┘ │
+│   │  probe path: uut.u_core.u_decode_stage               │
+│   │                        .reg_file_inst.{we,           │
+│   │                         write_reg, write_data}        │
+│   └──────────────────────────────────────────────────────┘
 │
-└── uvm_test_top : riscv_load_store_test  (extends riscv_test)
+└── uvm_test_top  :  riscv_alu_test  |  riscv_load_store_test
+    │                (selected via +UVM_TESTNAME on command line)
     │
     └── env : riscv_env
         │
@@ -277,88 +292,228 @@ riscv_uvm_tb  (Top-level HDL module — instantiates DUT + virtual interface)
         │   │
         │   ├── sequencer : uvm_sequencer #(riscv_seq_item)
         │   │
-        │   ├── driver : riscv_driver
-        │   │   ├── Backdoor ROM load  (uvm_hdl_deposit)
-        │   │   ├── Reset lifecycle    (uvm_hdl_force / uvm_hdl_release)
-        │   │   └── analysis port  ──────────────────────────────────────┐
-        │   │                                                             │
-        │   └── monitor : riscv_monitor                                  │
-        │       ├── Clocking-block sampling of reg_file write port        │
-        │       └── analysis port  ──────────────────────────────────┐   │
-        │                                                             │   │
-        └── scoreboard : riscv_scoreboard                            │   │
-            ├── observed_imp  ◄───────────────────────────────────────┘   │
-            └── expected_imp  ◄───────────────────────────────────────────┘
+        │   ├── driver : riscv_driver                         riscv_seq_item
+        │   │   ├── backdoor_load_rom()  (uvm_hdl_deposit) ──────────────────┐
+        │   │   ├── set_rst()            (uvm_hdl_force)                     │
+        │   │   └── ap : uvm_analysis_port #(riscv_seq_item) ────────────────┤
+        │   │                                                                 │
+        │   └── monitor : riscv_monitor                  riscv_regwrite_item │
+        │       ├── samples monitor_cb every cycle                           │
+        │       └── ap : uvm_analysis_port #(riscv_regwrite_item) ───────┐   │
+        │                                                                 │   │
+        └── scoreboard : riscv_scoreboard                                │   │
+            ├── observed_imp  ◄────────────────────────────────────────────┘   │
+            └── expected_imp  ◄────────────────────────────────────────────────┘
 ```
+
+---
+
+### Transaction Types
+
+The environment uses two distinct transaction classes, each carrying different information between components:
+
+**`riscv_seq_item`** — sequence to driver, driver to scoreboard
+```
+instructions[$]      — assembled 32-bit program words (index 0 = address 0x0000)
+expected_writes[$]   — ISS-predicted {rd, value} pairs in program order
+run_cycles           — clock budget before re-asserting reset (400 or 600 cycles)
+```
+
+**`riscv_regwrite_item`** — monitor to scoreboard
+```
+rd    [4:0]   — destination register address observed on the write port
+value [31:0]  — write data observed on the write port
+```
+
+The driver's analysis port carries a `riscv_seq_item` (full program + golden expected writes) into `scoreboard.expected_imp`. The monitor's analysis port carries individual `riscv_regwrite_item` observations into `scoreboard.observed_imp`. The two TLM connections use distinct `uvm_analysis_imp` suffixes (`_expected`, `_observed`) declared with `` `uvm_analysis_imp_decl `` so the scoreboard can receive two different transaction types on two different ports.
 
 ---
 
 ### Component Overview
 
-| Component | Role |
-|-----------|------|
-| **`riscv_uvm_tb`** | Top-level **HDL wrapper**. Instantiates the `soc_top` DUT and the `riscv_if` virtual interface, drives the clock, and maps the interface handle into `uvm_config_db` so all UVM components can access DUT signals without a direct hierarchical reference. |
-| **`riscv_test`** | **Test orchestration layer** (abstract base). Builds the environment, starts the target sequence on the sequencer, and controls the run-phase timeout budget. Concrete test classes (e.g. `riscv_load_store_test`) extend this base and supply the sequence under test. |
-| **`riscv_env`** | **Environment container**. Constructs and connects all sub-components. Wires the driver's `analysis_port` to the scoreboard's `expected_imp` TLM port, and the monitor's `analysis_port` to the scoreboard's `observed_imp` TLM port. |
-| **`riscv_agent`** | **Active agent**. Encapsulates the sequencer, driver, and monitor into a single reusable unit. The sequencer arbitrates sequence items from the active test and forwards them to the driver via a standard TLM pull interface. |
-| **`riscv_driver`** | **Stimulus executor**. Receives a `riscv_seq_item` containing the assembled program words and expected register writes. Performs the full reset lifecycle (assert reset → backdoor-load ROM → publish expected writes to scoreboard → release reset → wait for program completion). |
-| **`riscv_monitor`** | **Passive observer**. Samples the register file's synchronous write port (`we`, `write_reg`, `write_data`) on every rising clock edge using a **clocking block**, making all sampling race-free. Whenever `we=1` and `write_reg≠x0`, it packages the observed write into a `riscv_seq_item` and broadcasts it to the scoreboard via its analysis port. |
-| **`riscv_scoreboard`** | **In-order checker**. Maintains two TLM analysis-imp ports: `expected_imp` (fed by the driver before reset is released) and `observed_imp` (fed by the monitor during execution). Expected writes are held in a FIFO queue. Each observed write is dequeued and compared against the next expected entry — checking both the destination register number and the data value. Reports `PASS`/`FAIL` per write and a final summary at end-of-test. |
-| **`riscv_iss`** | **Golden Reference Model** (Instruction Set Simulator), embedded directly inside the test sequence. Before the program is sent to the driver, the ISS executes the same instruction stream in software and produces the authoritative list of `(register, value)` pairs that the real hardware must match. This list is what the driver forwards to the scoreboard's expected queue. |
+**`riscv_uvm_tb`** — Top-level HDL module
+
+Generates a 100 MHz clock (`always #5 clk = ~clk`), instantiates `soc_top` as `uut`, and instantiates `riscv_if`. Three `assign` statements tap the register file write port directly from the DUT hierarchy and drive the interface observation wires:
+
+```systemverilog
+assign dut_if.regfile_we    = uut.u_core.u_decode_stage.reg_file_inst.we;
+assign dut_if.regfile_waddr = uut.u_core.u_decode_stage.reg_file_inst.write_reg;
+assign dut_if.regfile_wdata = uut.u_core.u_decode_stage.reg_file_inst.write_data;
+```
+
+The interface handle is registered in `uvm_config_db` under the wildcard path `"uvm_test_top.*"` so every UVM component retrieves it with a single `get()` call. The test name is selected at runtime via `+UVM_TESTNAME`.
 
 ---
 
-### Backdoor ROM Loading Mechanism
+**`riscv_iss`** — Golden Reference Model
 
-On remote simulation platforms such as EDA Playground, the ROM model's `$readmemh` call fails because the local firmware path does not exist on the server's filesystem:
+A plain SystemVerilog class (not a UVM component) embedded inside `riscv_base_seq`. It holds a 32-register file (`regs[32]`) and a **sparse associative memory** (`logic [31:0] mem [bit [31:0]]`) so it can model any byte-addressed store without allocating 4 GB of memory.
 
-```
-Warning: Failed to open readmem file ".../firmware.mem"  (ENOENT)
-```
+The `execute()` function decodes one instruction and returns the committed `{rd, value}` pair. The `simulate()` function iterates the program, calls `execute()` on each word, and stops when it encounters `JAL x0, 0` (`32'h0000_006F`) — the infinite-loop end-of-program sentinel placed by every sequence. Supported instruction groups:
 
-To work around this without modifying the RTL, the UVM driver uses **runtime VPI backdoor access** via the UVM standard `uvm_hdl_deposit` API instead of a compile-time `force` statement.
+| Group | Instructions |
+|-------|-------------|
+| R-type | ADD, SUB, AND, OR, XOR, SLL, SRL, SRA, SLT, SLTU |
+| I-type ALU | ADDI, ANDI, ORI, XORI, SLLI, SRLI, SRAI, SLTI, SLTIU |
+| Loads | LB, LH, LW, LBU, LHU |
+| Stores | SB, SH, SW (updates ISS memory, no register write) |
+| Upper imm | LUI, AUIPC |
+| Jumps | JAL, JALR (rd = PC+4; control flow not modelled) |
+| Branches | Skipped (no register write) |
 
-**Why `force` cannot be used inside a UVM package:**
+---
 
-Questa resolves hierarchical paths in `force` statements at **compile time**, before the module hierarchy exists. A path such as `riscv_uvm_tb.uut.u_rom.mem[i]` inside a package triggers a fatal `vlog-7027` error because the package is compiled before the testbench module is elaborated.
+**`riscv_base_seq`** — Abstract base sequence
 
-**The `uvm_hdl_deposit` solution:**
+Owns an `riscv_iss` instance and provides instruction-encoding helper functions so derived sequences assemble programs without raw bit manipulation:
 
 ```systemverilog
-// In riscv_driver — called before reset is released
-localparam string ROM_PATH = "riscv_uvm_tb.uut.u_rom.mem";
-
-task backdoor_load_rom(input logic [31:0] words[$]);
-    string elem_path;
-    logic [31:0] word;
-    for (int i = 0; i < 1024; i++) begin
-        word      = (i < int'(words.size())) ? words[i] : 32'h00000013; // NOP padding
-        elem_path = $sformatf("%s[%0d]", ROM_PATH, i);
-        if (!uvm_hdl_deposit(elem_path, word))
-            `uvm_error("DRV", $sformatf("uvm_hdl_deposit FAILED: %s", elem_path))
-    end
-endtask
+r_type(rd, rs1, rs2, funct3, funct7)   // R-type encoding
+i_alu (rd, rs1, funct3, imm)           // I-type ALU (opcode 0010011)
+i_load(rd, rs1, funct3, imm)           // Load       (opcode 0000011)
+s_type(rs1, rs2, funct3, imm)          // Store      (opcode 0100011)
+lui   (rd, imm_u)                      // LUI        (opcode 0110111)
+jal   (rd, offset)                     // JAL        (opcode 1101111)
+end_program()                          // JAL x0, 0  (32'h0000_006F)
 ```
 
-| Property | Detail |
-|----------|--------|
-| **Path resolution** | String evaluated at **runtime** by the VPI layer — no compile-time hierarchy dependency |
-| **Access grant** | Questa's `-access=rw+/.` flag (passed automatically by EDA Playground) enables full VPI read/write access to all signals |
-| **Reset signal** | `rst_n` is controlled the same way via `uvm_hdl_force` / `uvm_hdl_release` using the path `"riscv_uvm_tb.rst_n"` |
-| **Portability** | Works on any UVM-compliant simulator that supports the `uvm_hdl_*` DPI-C backdoor API |
+Derived sequences call `iss.simulate(prog, item.expected_writes)` to populate the golden list before handing the item to the driver.
 
-The complete load sequence in the driver's `run_phase` is:
+---
+
+**`riscv_driver`** — Stimulus executor
+
+Receives `riscv_seq_item` from the sequencer and executes the following protocol for every item:
 
 ```
-1. uvm_hdl_force  rst_n = 0        (hold reset)
-2. uvm_hdl_deposit mem[0..1023]    (write program words into ROM)
-3. write_expected_to_scoreboard()  (publish golden results before reset release)
-4. wait 10 clock cycles
-5. uvm_hdl_release rst_n           (release reset — pipeline begins fetching)
-6. wait run_cycles clock cycles    (allow program to complete)
+Step 1   uvm_hdl_force  "riscv_uvm_tb.rst_n" = 0    assert reset
+Step 2   wait 2 monitor_cb edges
+Step 3   backdoor_load_rom(item.instructions)         write all 1024 ROM words
+Step 4   ap.write(item)                               publish golden list to scoreboard
+Step 5   wait 10 monitor_cb edges                     hold reset
+Step 6   uvm_hdl_force  "riscv_uvm_tb.rst_n" = 1    release reset
+Step 7   wait item.run_cycles monitor_cb edges        let program execute
+Step 8   uvm_hdl_force  "riscv_uvm_tb.rst_n" = 0    re-assert reset for next item
 ```
 
-This approach fully decouples the verification environment from the host filesystem and makes the testbench portable to any remote simulator or CI environment.
+The golden list is published in **step 4, before reset is released**, guaranteeing the scoreboard's expected queue is populated before the monitor can produce any observed events.
+
+---
+
+**`riscv_monitor`** — Passive observer
+
+Waits on `monitor_cb` (the clocking block, sampled `#1step` after the clock edge) every cycle. When all three conditions hold simultaneously, it creates a `riscv_regwrite_item` and broadcasts it:
+
+```
+vif.monitor_cb.rst_n        == 1    (core is out of reset)
+vif.monitor_cb.regfile_we   == 1    (a write is committing)
+vif.monitor_cb.regfile_waddr != 0   (destination is not x0)
+```
+
+The `#1step` sampling delay is the UVM-recommended practice for clocking blocks: it ensures the monitor reads stable, post-settling values and never races with combinational logic driven by the same clock edge.
+
+---
+
+**`riscv_scoreboard`** — In-order checker
+
+Holds an internal FIFO queue `expected_q[$]` of `{rd, value}` structs. Two write callbacks feed it:
+
+- `write_expected(riscv_seq_item)` — called by the driver; pushes all entries from `item.expected_writes` into the queue.
+- `write_observed(riscv_regwrite_item)` — called by the monitor; pops the front entry and performs two checks: destination register number match, then data value match.
+
+In `report_phase`, the scoreboard emits a final summary and raises `UVM_FATAL` if any check failed, ensuring a non-zero simulation exit code on any mismatch.
+
+---
+
+**`riscv_env`** — Environment container
+
+Constructs `riscv_agent` and `riscv_scoreboard` in `build_phase`. In `connect_phase` it wires the two analysis ports:
+
+```systemverilog
+agent.driver.ap.connect(scoreboard.expected_imp);   // riscv_seq_item path
+agent.monitor.ap.connect(scoreboard.observed_imp);  // riscv_regwrite_item path
+```
+
+---
+
+**`riscv_agent`** — Agent
+
+Constructs `uvm_sequencer #(riscv_seq_item)`, `riscv_driver`, and `riscv_monitor`. Connects `driver.seq_item_port` to `sequencer.seq_item_export` in `connect_phase`.
+
+---
+
+**`riscv_base_test`** — Base test
+
+Creates `riscv_env`. Calls `uvm_top.print_topology()` in `end_of_elaboration_phase` to print the full component hierarchy to the simulation log. Concrete tests extend this class and override `run_phase` only.
+
+---
+
+### Available Tests
+
+#### `riscv_alu_test` — ALU coverage
+
+Runs `riscv_alu_seq`: 18 instructions (17 register writes), `run_cycles = 400`.
+
+| Instruction | Expected result | Notes |
+|-------------|----------------|-------|
+| `ADDI x1, x0, 10` | `x1 = 10` | operand A |
+| `ADDI x2, x0, 3` | `x2 = 3` | operand B |
+| `ADD  x3, x1, x2` | `x3 = 13` | |
+| `SUB  x4, x1, x2` | `x4 = 7` | |
+| `AND  x5, x1, x2` | `x5 = 2` | `0xA & 0x3` |
+| `OR   x6, x1, x2` | `x6 = 11` | `0xA \| 0x3` |
+| `XOR  x7, x1, x2` | `x7 = 9` | `0xA ^ 0x3` |
+| `SLL  x8, x1, x2` | `x8 = 80` | `10 << 3` |
+| `SRL  x9, x1, x2` | `x9 = 1` | `10 >> 3` |
+| `ADDI x10, x0, -4` | `x10 = 0xFFFFFFFC` | |
+| `SRA  x10, x10, x2` | `x10 = 0xFFFFFFFF` | arithmetic shift, sign-extended |
+| `SLT  x11, x1, x2` | `x11 = 0` | 10 is not < 3 |
+| `SLT  x12, x2, x1` | `x12 = 1` | 3 < 10 |
+| `ADDI x13, x1, 5` | `x13 = 15` | |
+| `ANDI x14, x1, 0xF` | `x14 = 10` | `0xA & 0xF` |
+| `ORI  x15, x1, 5` | `x15 = 15` | `0xA \| 0x5` |
+| `XORI x16, x1, 0xF` | `x16 = 5` | `0xA ^ 0xF` |
+
+#### `riscv_load_store_test` — Memory and D-Cache coverage
+
+Runs `riscv_load_store_seq`: 10 instructions (6 register writes), `run_cycles = 600`. The larger budget accounts for D-Cache cold-start misses (~5 stall cycles per load).
+
+RAM is mapped at `0x2000–0x2FFF`. The test stores a byte value (`0xAB`) to RAM using all store widths, then loads it back using all load widths to verify byte-enable logic, sign extension, and zero extension.
+
+| Instruction | Expected result | Notes |
+|-------------|----------------|-------|
+| `LUI  x1, 2` | `x1 = 0x00002000` | RAM base address |
+| `ADDI x2, x0, 171` | `x2 = 0x000000AB` | test byte value |
+| `SW   x2, 0(x1)` | *(no reg write)* | stores word to `mem[0x2000]` |
+| `LW   x3, 0(x1)` | `x3 = 0x000000AB` | 32-bit load |
+| `SB   x2, 4(x1)` | *(no reg write)* | stores byte to `mem[0x2004]` |
+| `LBU  x4, 4(x1)` | `x4 = 0x000000AB` | byte load, zero-extended |
+| `LB   x5, 4(x1)` | `x5 = 0xFFFFFFAB` | byte load, **sign-extended** (bit 7 = 1) |
+| `SH   x2, 8(x1)` | *(no reg write)* | stores halfword to `mem[0x2008]` |
+| `LHU  x6, 8(x1)` | `x6 = 0x000000AB` | halfword load, zero-extended |
+
+---
+
+### Backdoor ROM Loading
+
+On remote platforms such as EDA Playground the ROM's `$readmemh` path does not exist on the server. The driver bypasses this using `uvm_hdl_deposit` with a **runtime string path** instead of a compile-time `force` statement.
+
+`force` inside a UVM package fails with `vlog-7027` because Questa resolves hierarchical paths at compile time, before the module hierarchy exists. `uvm_hdl_deposit` passes the path as a string to the VPI layer, which resolves it at runtime after elaboration is complete. EDA Playground's `-access=rw+/.` flag grants the required VPI write access automatically.
+
+```systemverilog
+localparam string ROM_HDL_PATH = "riscv_uvm_tb.uut.u_rom.mem";
+localparam string RST_HDL_PATH = "riscv_uvm_tb.rst_n";
+
+// Write all 1024 ROM words — program words first, then NOP padding
+for (int i = 0; i < 1024; i++) begin
+    rom_word  = (i < words.size()) ? words[i] : 32'h00000013;
+    elem_path = $sformatf("%s[%0d]", ROM_HDL_PATH, i);
+    if (!uvm_hdl_deposit(elem_path, rom_word))
+        `uvm_error("DRV", $sformatf("uvm_hdl_deposit FAILED: %s", elem_path))
+end
+```
+
+To retarget the testbench to a different DUT hierarchy, only the two `localparam string` paths in `riscv_driver` need to change.
 
 ---
 
@@ -366,18 +521,21 @@ This approach fully decouples the verification environment from the host filesys
 
 | Test | Instructions | Expected Writes | Result |
 |------|-------------|-----------------|--------|
-| `riscv_load_store_test` | 10 (LUI, ADDI, SW, LW, SB, LBU, LB, SH, LHU, JAL) | 6 | ✅ **6 / 6 PASSED** |
+| `riscv_alu_test` | 18 | 17 | ✅ *pending run* |
+| `riscv_load_store_test` | 10 | 6 | ✅ **6 / 6 PASSED** |
 
-Verified register writes:
+`riscv_load_store_test` confirmed on Siemens Questa 2025.2 via EDA Playground:
 
-| Register | Instruction | Value | Notes |
-|----------|------------|-------|-------|
-| `x1` | `LUI x1, 2` | `0x00002000` | Base address |
-| `x2` | `ADDI x2, x0, 171` | `0x000000AB` | Byte value |
-| `x3` | `LW x3, 0(x1)` | `0x000000AB` | 32-bit word load |
-| `x4` | `LBU x4, 4(x1)` | `0x000000AB` | Byte load — zero extended |
-| `x5` | `LB x5, 4(x1)` | `0xFFFFFFAB` | Byte load — **sign extended** (bit 7 = 1) |
-| `x6` | `LHU x6, 8(x1)` | `0x000000AB` | Halfword load — zero extended |
+```
+UVM_INFO [SB] PASS  x1 = 0x00002000
+UVM_INFO [SB] PASS  x2 = 0x000000ab
+UVM_INFO [SB] PASS  x3 = 0x000000ab
+UVM_INFO [SB] PASS  x4 = 0x000000ab
+UVM_INFO [SB] PASS  x5 = 0xffffffab
+UVM_INFO [SB] PASS  x6 = 0x000000ab
+UVM_INFO [SB] ALL TESTS PASSED - 6 passed, 0 failed
+Errors: 0, Warnings: 1  (warning is harmless $readmemh file-not-found)
+```
 
 ---
 
