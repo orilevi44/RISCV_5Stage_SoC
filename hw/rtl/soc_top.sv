@@ -10,10 +10,15 @@
 //
 // D-Cache integration note:
 //   The core no longer exposes raw MEM-stage signals.  Instead it exposes the
-//   D-Cache's RAM bus (dcache_ram_*).  All data-bus traffic — including MMIO —
-//   passes through the D-Cache FSM.  The D-Cache stalls the pipeline on a miss
-//   and presents the refilled data once the line is allocated.
-//   RAM write-back evictions are always full-word (byte_en = 4'b1111).
+//   D-Cache's RAM bus (dcache_ram_*).  Only RAM-window traffic (0x2000–0x2FFF)
+//   passes through the D-Cache FSM; MMIO addresses (GPIO, UART, PIC) bypass
+//   the cache entirely and go directly to the system bus.
+//   The D-Cache implements a WRITE-BACK policy with dirty-bit tracking:
+//     - Write hits update the cache line only (dirty bit set); RAM is NOT written.
+//     - On a conflict miss with a dirty victim, the FSM evicts the dirty line to
+//       RAM (WRITE_BACK state) before fetching the new line (FETCH → ALLOCATE).
+//   Evictions always write full 32-bit words to the bus (byte_en = 4'b1111),
+//   because cache lines are allocated and evicted at word granularity.
 module soc_top (
     input  logic         clk,
     input  logic         rst_n,
@@ -46,6 +51,13 @@ module soc_top (
         .clk              (clk),
         .rst_n            (rst_n),
         .ext_intr         (ext_intr),
+
+        // Legacy direct-memory interface — unused because the I-Cache inside
+        // the core handles all instruction fetches via rom_addr/rom_data below.
+        // Tie inputs to safe constants to silence vopt-2718 port warnings.
+        .instr_mem_data   (32'b0),  // unused: I-Cache fetches via rom_*
+        .instr_mem_ready  (1'b0),   // unused: I-Cache fetches via rom_*
+        .instr_mem_addr   (),       // unused output — left open
 
         // ROM Interface (I-Cache inside core → ROM)
         .rom_addr         (instr_addr),
@@ -96,7 +108,9 @@ module soc_top (
     end
 
     // --- 3. System Bus ---
-    // D-Cache evictions are always full-word writes, so ram_byte_en = 4'b1111.
+    // The D-Cache uses a Write-Back policy. When the FSM evicts a dirty cache
+    // line it writes one 32-bit word per cycle to RAM; byte_en is always
+    // 4'b1111 because the cache works at word granularity during eviction.
     (* dont_touch = "true" *)
     system_bus u_data_bus (
         .addr         (data_addr),
@@ -130,7 +144,9 @@ module soc_top (
         .addr    (data_addr),
         .wr_en   (ram_we),
         .wr_data (data_wdata),
-        // System bus passes data_byte_en (4'b1111) through as ram_byte_en
+        // Write-Back evictions drive full-word beats (byte_en=4'b1111).
+        // Sub-word byte masking (sb/sh) is applied inside the D-Cache itself
+        // at write-hit time, so the system bus always sees complete 32-bit words.
         .byte_en (4'b1111),
         .rd_data (ram_rdata)
     );
